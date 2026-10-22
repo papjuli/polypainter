@@ -1,10 +1,10 @@
 import { Vector3 } from 'three';
 
-const PHI = (1 + Math.sqrt(5)) / 2;
+export const PHI = (1 + Math.sqrt(5)) / 2;
 const EPSILON = 1e-6;
 
 // All sign variants of a coordinate triple, e.g. [1, 0, 2] -> (±1, 0, ±2).
-function withSigns(triple) {
+export function withSigns(triple) {
   let results = [[]];
   for (const c of triple) {
     const options = c === 0 ? [0] : [c, -c];
@@ -13,7 +13,7 @@ function withSigns(triple) {
   return results;
 }
 
-function cyclicPermutations([a, b, c]) {
+export function cyclicPermutations([a, b, c]) {
   return [
     [a, b, c],
     [b, c, a],
@@ -45,9 +45,11 @@ const DEFINITIONS = [
   {
     id: 'dodecahedron',
     name: 'Dodecahedron',
+    // Oriented as the dual of the icosahedron below, so the two share the
+    // same symmetry axes.
     coordinates: [
       ...withSigns([1, 1, 1]),
-      ...cyclicPermutations([0, 1 / PHI, PHI]).flatMap(withSigns),
+      ...cyclicPermutations([0, PHI, 1 / PHI]).flatMap(withSigns),
     ],
   },
   {
@@ -120,12 +122,53 @@ function findEdges(faces) {
   return [...edges.values()];
 }
 
+// A face's plane and a 2D frame in it: `up` points from the center to the
+// middle of the face's first edge, and (right, up, normal) is right-handed, so
+// face coordinates are not mirrored when seen from outside.
+function faceFrame(face, vertices) {
+  const center = new Vector3();
+  for (const i of face) center.add(vertices[i]);
+  center.divideScalar(face.length);
+
+  const [a, b, c] = face.map((i) => vertices[i]);
+  const normal = new Vector3()
+    .subVectors(b, a)
+    .cross(new Vector3().subVectors(c, a))
+    .normalize();
+  const up = a.clone().add(b).multiplyScalar(0.5).sub(center).normalize();
+  const right = new Vector3().crossVectors(up, normal);
+  return { center, normal, offset: normal.dot(center), right, up };
+}
+
 function buildPolyhedron({ id, name, coordinates }) {
   // Scale every solid to a circumradius of 1 so they appear at similar sizes.
   const vertices = coordinates.map((c) => new Vector3(...c).normalize());
   const faces = findFaces(vertices);
   const edges = findEdges(faces);
-  return { id, name, vertices, faces, edges };
+  const faceFrames = faces.map((face) => faceFrame(face, vertices));
+  return { id, name, vertices, faces, edges, faceFrames };
 }
 
 export const POLYHEDRA = DEFINITIONS.map(buildPolyhedron);
+
+// Coordinates of a point in a face's 2D frame, centered on the face.
+export function toFaceCoordinates({ center, right, up }, point) {
+  const relative = point.clone().sub(center);
+  return [relative.dot(right), relative.dot(up)];
+}
+
+// The face whose plane a point on (or inside) the solid is closest to.
+export function faceAt({ faceFrames }, point) {
+  let closest = 0;
+  faceFrames.forEach(({ normal, offset }, i) => {
+    const { normal: n, offset: d } = faceFrames[closest];
+    if (normal.dot(point) / offset > n.dot(point) / d) closest = i;
+  });
+  return closest;
+}
+
+// Moves a point inside the solid outward from the center onto the surface.
+export function projectToSurface({ faceFrames }, point) {
+  const scale = Math.max(...faceFrames.map(({ normal, offset }) => normal.dot(point) / offset));
+  return point.clone().divideScalar(scale);
+}

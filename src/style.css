@@ -3,6 +3,7 @@
   --bg: #14161c;
   --panel: rgba(30, 33, 42, 0.85);
   --border: rgba(255, 255, 255, 0.08);
+  --control: rgba(255, 255, 255, 0.06);
   --text: #e8ecf4;
   --muted: #9aa3b5;
   --accent: #5b8def;
@@ -25,6 +26,13 @@ body {
 
 #viewport canvas {
   display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+#viewport.painting canvas {
+  cursor: crosshair;
 }
 
 .toolbar,
@@ -62,15 +70,19 @@ h1 {
   letter-spacing: 0.01em;
 }
 
+.picker,
+.tools {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
 .picker {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
-  background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: 10px;
-  backdrop-filter: blur(8px);
 }
 
 button {
@@ -84,18 +96,169 @@ button {
   cursor: pointer;
 }
 
-button:hover {
-  background: rgba(255, 255, 255, 0.06);
+button:hover:not(:disabled) {
+  background: var(--control);
 }
 
-button:focus-visible {
+button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.picker button[aria-pressed='true'] {
+.picker button[aria-pressed='true'],
+.segmented button[aria-pressed='true'] {
   background: var(--accent);
   color: #fff;
+}
+
+.tools {
+  position: fixed;
+  top: 76px;
+  left: 16px;
+  width: 232px;
+  max-height: calc(100% - 76px - 76px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > label,
+.field > .label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+
+select option {
+  background: #1e212a;
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--control);
+  border-radius: 9px;
+}
+
+.segmented button {
+  flex: 1;
+  padding: 5px 0;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.swatch {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0;
+  padding: 0;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+
+.swatch.selected {
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+input[type='color'].swatch {
+  appearance: none;
+  background: conic-gradient(#e05252, #e0c252, #52e070, #52c2e0, #5262e0, #c252e0, #e05252);
+}
+
+input[type='color'].swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type='color'].swatch::-webkit-color-swatch,
+input[type='color'].swatch::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+input[type='color'].swatch:not(.selected)::-webkit-color-swatch {
+  opacity: 0;
+}
+
+input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+.actions button,
+#reset-view {
+  background: var(--control);
+  border-color: var(--border);
+}
+
+.actions button {
+  flex: 1;
+  padding: 6px 0;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.checkbox input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 #solid-stats {
@@ -110,15 +273,57 @@ button:focus-visible {
 
 #reset-view {
   background: var(--panel);
-  border-color: var(--border);
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
   .hint {
     display: none;
   }
 
   .status {
     justify-content: space-between;
+  }
+}
+
+/* On phones the panels stack around the view instead of covering it. */
+@media (max-width: 600px) {
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #viewport,
+  .toolbar,
+  .tools,
+  .status {
+    position: relative;
+    inset: auto;
+  }
+
+  .toolbar {
+    order: -1;
+  }
+
+  #viewport {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .tools {
+    width: auto;
+    max-height: none;
+    margin: 0 8px;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .field > label,
+  .field > .label,
+  .note {
+    display: none;
+  }
+
+  .status {
+    padding: 12px 16px;
   }
 }

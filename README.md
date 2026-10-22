@@ -35,3 +35,9 @@ npm run build    # production build in dist/
   dab paints where a small ball meets the surface, and is drawn once for every
   element of the chosen group. Strokes are stored, so the texture can be redrawn
   for undo and when switching solids.
+
+## Deployment
+
+Pushing to `main` builds the site and publishes it to GitHub Pages via
+`.github/workflows/deploy.yml`. In the repository's **Settings → Pages**, set
+**Source** to **GitHub Actions** once to enable it.

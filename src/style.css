@@ -1,0 +1,124 @@
+:root {
+  color-scheme: dark;
+  --bg: #14161c;
+  --panel: rgba(30, 33, 42, 0.85);
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #e8ecf4;
+  --muted: #9aa3b5;
+  --accent: #5b8def;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+}
+
+#viewport canvas {
+  display: block;
+}
+
+.toolbar,
+.status {
+  position: fixed;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  pointer-events: none;
+}
+
+.toolbar > *,
+.status > * {
+  pointer-events: auto;
+}
+
+.toolbar {
+  top: 0;
+  justify-content: space-between;
+}
+
+.status {
+  bottom: 0;
+  font-size: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+}
+
+button {
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.picker button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+#solid-stats {
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  flex: 1;
+  color: var(--muted);
+  text-align: center;
+}
+
+#reset-view {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+@media (max-width: 600px) {
+  .hint {
+    display: none;
+  }
+
+  .status {
+    justify-content: space-between;
+  }
+}

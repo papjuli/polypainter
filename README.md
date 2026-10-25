@@ -20,9 +20,14 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
   own painting.
-- Export net downloads the painted solid unfolded as a PNG, with glue tabs, to
-  print, cut out along the solid lines and fold along the dashed ones.
-  Transparent areas are left blank.
+- Export net downloads the painted solid unfolded on an A4 page, with glue
+  tabs, as a PNG to print, cut out along the solid lines and fold along the
+  dashed ones. Transparent areas are left blank. It also downloads a DXF of
+  the lines to cut for a cutting machine: the outline, holes where the paint
+  is transparent, and perforated folds, with a frame the size of the page.
+- To print and cut with Silhouette Studio, place the PNG on an A4 page and the
+  DXF over it, lined up by its frame. Ungroup the DXF and delete the frame. The
+  net keeps clear of the corners where the registration marks go.
 
 ## Development
 
@@ -44,7 +49,12 @@ npm run build    # production build in dist/
   for undo and when switching solids. The texture keeps its alpha premultiplied,
   so the edges of transparent paint blend as cleanly as those of colors.
 - `src/net.js` unfolds a solid along a spanning tree of its faces, adds glue
-  tabs where they fit, and draws each face from the texture atlas.
+  tabs where they fit, turns and scales the net to fill the page, and draws
+  each face from the texture atlas.
+- `src/cutfile.js` writes a net's cut and fold lines as a DXF file, and
+  `src/png.js` sets the PNG's pixel size so it prints at the size of the page.
+  The holes are traced from the net drawn on the page, by marching squares in
+  `src/contours.js`.
 - `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
   its neighbor's where the fill reaches an edge. A fill is stored as the runs
   of pixels it covers.

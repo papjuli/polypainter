@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { drawNet, unfold } from './net.js';
+import { cutFile } from './cutfile.js';
+import { PIXELS_PER_MM, drawNet, findHoles, placeOnPage, unfold } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
+import { setPixelsPerMeter } from './png.js';
 import { POLYHEDRA, faceAt } from './polyhedra.js';
 import { symmetryGroups } from './symmetry.js';
 import './style.css';
@@ -314,15 +316,26 @@ showEdges.addEventListener('change', () => {
   for (const solid of solids.values()) solid.edgeLines.visible = showEdges.checked;
 });
 
+function download(blob, filename) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  // Some browsers start the download only after the click has returned.
+  setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+}
+
+// Downloads the net on an A4 page as a PNG to print, and the lines to cut it
+// out along, holes included, as a DXF that lines up with it.
 exportButton.addEventListener('click', () => {
   const { polyhedron, layout } = current.painting;
-  drawNet(unfold(polyhedron), layout, painter.toCanvas()).toBlob((blob) => {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `polypainter-${polyhedron.id}-net.png`;
-    link.click();
-    // Some browsers start the download only after the click has returned.
-    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  const net = placeOnPage(unfold(polyhedron));
+  const atlas = painter.toCanvas();
+  const name = `polypainter-${polyhedron.id}-net`;
+  drawNet(net, layout, atlas).toBlob(async (blob) => {
+    download(await setPixelsPerMeter(blob, PIXELS_PER_MM * 1000), `${name}.png`);
+    const dxf = cutFile(net, findHoles(net, layout, atlas));
+    download(new Blob([dxf], { type: 'application/dxf' }), `${name}.dxf`);
   });
 });
 

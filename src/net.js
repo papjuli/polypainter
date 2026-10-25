@@ -1,19 +1,62 @@
+import { area, simplify, traceOutlines } from './contours.js';
 import { toFaceCoordinates } from './polyhedra.js';
+
+// The page, A4 portrait, in mm with the origin at its bottom left corner.
+export const PAGE_WIDTH = 210;
+export const PAGE_HEIGHT = 297;
+// A whole number of pixels per mm, about 300 dpi, so the image is exactly the
+// size of the page.
+export const PIXELS_PER_MM = 12;
+// Silhouette Studio's print and cut wants the edges of the page clear, and
+// the top left, top right and bottom left corners for its registration marks.
+// These leave the room its default marks take, with some to spare.
+const PAGE_MARGIN = 16;
+const CORNER_SIZE = 41;
+// Bisection steps when fitting a net onto the page, and the positions tried
+// across the page in each direction at each step.
+const FIT_STEPS = 20;
+const FIT_POSITIONS = 9;
+// How far the outlines of holes, cut where the paint is transparent, may
+// stray from it to save points, in mm, and the smallest hole cut, in mm².
+const HOLE_TOLERANCE = 0.02;
+const MIN_HOLE_AREA = 1;
 
 // Glue tabs are trapezoids on one side of every cut edge. Their sides lean in
 // by less than the 36° gap left at a dodecahedron's vertices, the narrowest of
 // the five solids, so a tab never runs into the face across the gap.
 const TAB_HEIGHT = 0.15;
 const TAB_ANGLE = (30 * Math.PI) / 180;
-// Sizes on the printed net, in world units.
-const MARGIN = 0.1;
-const LINE_WIDTH = 0.005;
-const FOLD_DASHES = [0.04, 0.03];
+// Sizes on the printed page, in mm.
+const LINE_WIDTH = 0.3;
+const FOLD_DASHES = [2.4, 1.8];
 const LINE_COLOR = '#1d1d1f';
 const TAB_COLOR = '#dedad2';
-// Safari refuses to draw canvases with more pixels than this.
-const MAX_PIXELS = 16_000_000;
 const EPSILON = 1e-6;
+
+// The net keeps a line width further from the edges and corners, as printed
+// lines reach past its outline by half their width, and faces are drawn a
+// pixel larger.
+const FIT_MARGIN = PAGE_MARGIN + LINE_WIDTH;
+const FIT_CORNER_SIZE = CORNER_SIZE + LINE_WIDTH;
+const square = (left, bottom, size) => [
+  [left, bottom],
+  [left + size, bottom],
+  [left + size, bottom + size],
+  [left, bottom + size],
+];
+const MARK_CORNERS = [
+  square(0, PAGE_HEIGHT - FIT_CORNER_SIZE, FIT_CORNER_SIZE),
+  square(PAGE_WIDTH - FIT_CORNER_SIZE, PAGE_HEIGHT - FIT_CORNER_SIZE, FIT_CORNER_SIZE),
+  square(0, 0, FIT_CORNER_SIZE),
+];
+const MARK_CORNER_BOUNDS = MARK_CORNERS.map(bounds);
+
+// The positions tried for a net at each scale, as fractions of the room it
+// has to move across the page, nearest the middle first.
+const FIT_GRID = Array.from({ length: FIT_POSITIONS ** 2 }, (_, i) => [
+  (i % FIT_POSITIONS) / (FIT_POSITIONS - 1),
+  Math.floor(i / FIT_POSITIONS) / (FIT_POSITIONS - 1),
+]).sort(([a, b], [c, d]) => Math.hypot(a - 0.5, b - 0.5) - Math.hypot(c - 0.5, d - 0.5));
 
 const IDENTITY = { xx: 1, xy: 0, yx: 0, yy: 1, x: 0, y: 0 };
 
@@ -30,16 +73,22 @@ function rigidMap([ax, ay], [bx, by], [Ax, Ay], [Bx, By]) {
   return { xx: cos, xy: -sin, yx: sin, yy: cos, x: Ax - cos * ax + sin * ay, y: Ay - sin * ax - cos * ay };
 }
 
-// A rotation about the origin, applied after `map`.
-function rotate({ xx, xy, yx, yy, x, y }, angle) {
-  const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
+// A rotation by `angle` about the origin and scaling by `scale`, followed by
+// a move by (x, y).
+function similarity(angle, scale = 1, x = 0, y = 0) {
+  const [cos, sin] = [scale * Math.cos(angle), scale * Math.sin(angle)];
+  return { xx: cos, xy: -sin, yx: sin, yy: cos, x, y };
+}
+
+// The map applying `inner`, then `outer`.
+function compose(outer, inner) {
   return {
-    xx: cos * xx - sin * yx,
-    xy: cos * xy - sin * yy,
-    yx: sin * xx + cos * yx,
-    yy: sin * xy + cos * yy,
-    x: cos * x - sin * y,
-    y: sin * x + cos * y,
+    xx: outer.xx * inner.xx + outer.xy * inner.yx,
+    xy: outer.xx * inner.xy + outer.xy * inner.yy,
+    yx: outer.yx * inner.xx + outer.yy * inner.yx,
+    yy: outer.yx * inner.xy + outer.yy * inner.yy,
+    x: outer.xx * inner.x + outer.xy * inner.y + outer.x,
+    y: outer.yx * inner.x + outer.yy * inner.y + outer.y,
   };
 }
 
@@ -97,7 +146,7 @@ export function unfold({ vertices, faces, faceFrames }) {
     for (const [, a, b] of edgesOf(f)) faceAlong.set(`${a}-${b}`, f);
   });
 
-  let placements = [IDENTITY];
+  const placements = [IDENTITY];
   const treeEdges = new Set();
   // Iterating the queue also visits the faces pushed onto it on the way.
   const queue = [0];
@@ -117,23 +166,7 @@ export function unfold({ vertices, faces, faceFrames }) {
     }
   }
 
-  // Lines the net up with whichever of its edges gives it the smallest
-  // bounding box, to make the best use of the paper.
-  const place = (maps) => corners.map((points, f) => points.map((p) => apply(maps[f], p)));
-  const areaTurnedBy = (angle) => {
-    const { minX, maxX, minY, maxY } = bounds(place(placements.map((map) => rotate(map, angle))).flat());
-    return (maxX - minX) * (maxY - minY);
-  };
-  const turns = place(placements).flatMap((polygon) =>
-    polygon.map(([px, py], i) => {
-      const [qx, qy] = polygon[(i + 1) % polygon.length];
-      return -Math.atan2(qy - py, qx - px);
-    }),
-  );
-  const turn = turns.reduce((best, angle) => (areaTurnedBy(angle) < areaTurnedBy(best) ? angle : best));
-  placements = placements.map((map) => rotate(map, turn));
-
-  const netFaces = place(placements);
+  const netFaces = corners.map((points, f) => points.map((p) => apply(placements[f], p)));
   const segment = (f, i) => [netFaces[f][i], netFaces[f][(i + 1) % faces[f].length]];
   const folds = [];
   const cuts = [];
@@ -169,6 +202,88 @@ export function unfold({ vertices, faces, faceFrames }) {
   return { placements, faces: netFaces, folds, cuts, tabs };
 }
 
+// Where polygons scaled by `scale` fit on the page, inside its margins and
+// clear of the registration marks' corners, as the move to put them there.
+function findPlace(polygons, scale) {
+  const boxes = polygons.map(bounds);
+  const { minX, maxX, minY, maxY } = bounds(polygons.flat());
+  const [left, right] = [FIT_MARGIN - scale * minX, PAGE_WIDTH - FIT_MARGIN - scale * maxX];
+  const [bottom, top] = [FIT_MARGIN - scale * minY, PAGE_HEIGHT - FIT_MARGIN - scale * maxY];
+  if (left > right || bottom > top) return null;
+  const clearAt = (x, y) =>
+    polygons.every((polygon, i) =>
+      MARK_CORNERS.every((corner, j) => {
+        const [box, cornerBox] = [boxes[i], MARK_CORNER_BOUNDS[j]];
+        if (
+          x + scale * box.minX >= cornerBox.maxX ||
+          x + scale * box.maxX <= cornerBox.minX ||
+          y + scale * box.minY >= cornerBox.maxY ||
+          y + scale * box.maxY <= cornerBox.minY
+        ) {
+          return true;
+        }
+        return !overlaps(
+          polygon.map(([px, py]) => [x + scale * px, y + scale * py]),
+          corner,
+        );
+      }),
+    );
+  for (const [u, v] of FIT_GRID) {
+    const [x, y] = [left + u * (right - left), bottom + v * (top - bottom)];
+    if (clearAt(x, y)) return [x, y];
+  }
+  return null;
+}
+
+// Places a net on the page, in mm, turned and scaled to be as large as fits.
+export function placeOnPage({ placements, faces, folds, cuts, tabs }) {
+  const polygons = [...faces, ...tabs];
+  // Tries the net with each edge of its faces along each side of the page.
+  const angles = new Map();
+  for (const polygon of faces) {
+    polygon.forEach(([px, py], i) => {
+      const [qx, qy] = polygon[(i + 1) % polygon.length];
+      for (let k = 0; k < 4; k++) {
+        const angle = ((k * Math.PI) / 2 - Math.atan2(qy - py, qx - px) + 4 * Math.PI) % (2 * Math.PI);
+        angles.set(angle.toFixed(6), angle);
+      }
+    });
+  }
+
+  let best = { scale: 0 };
+  for (const angle of angles.values()) {
+    const turned = polygons.map((polygon) => polygon.map((p) => apply(similarity(angle), p)));
+    const { minX, maxX, minY, maxY } = bounds(turned.flat());
+    // Bisects up to the scale at which the net fills the space within the
+    // margins, from the best scale so far, as the angle has to beat it.
+    let low = best.scale;
+    let high = Math.min(
+      (PAGE_WIDTH - 2 * FIT_MARGIN) / (maxX - minX),
+      (PAGE_HEIGHT - 2 * FIT_MARGIN) / (maxY - minY),
+    );
+    for (let step = 0; step < FIT_STEPS && low < high; step++) {
+      const scale = (low + high) / 2;
+      const place = findPlace(turned, scale);
+      if (place) {
+        best = { angle, scale, place };
+        low = scale;
+      } else {
+        high = scale;
+      }
+    }
+  }
+
+  const map = similarity(best.angle, best.scale, ...best.place);
+  const move = (points) => points.map((p) => apply(map, p));
+  return {
+    placements: placements.map((placement) => compose(map, placement)),
+    faces: faces.map(move),
+    folds: folds.map(move),
+    cuts: cuts.map(move),
+    tabs: tabs.map(move),
+  };
+}
+
 // Grows a regular polygon outward by `amount`.
 function grow(polygon, amount) {
   const cx = polygon.reduce((sum, [x]) => sum + x, 0) / polygon.length;
@@ -178,38 +293,31 @@ function grow(polygon, amount) {
   return polygon.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
 }
 
-// Draws a net, painting each face from `atlas`, a canvas holding the painter's
-// texture with its bottom row first. Uses the texture's resolution unless the
-// canvas would get too large.
-export function drawNet({ placements, faces, folds, cuts, tabs }, layout, atlas) {
-  const { minX, maxX, minY, maxY } = bounds([...faces, ...tabs].flat());
-  const [width, height] = [maxX - minX + 2 * MARGIN, maxY - minY + 2 * MARGIN];
-  const scale = Math.min(layout.density, Math.sqrt(MAX_PIXELS / (width * height)));
+// The canvas's y axis points down.
+const canvasX = (x) => x * PIXELS_PER_MM;
+const canvasY = (y) => (PAGE_HEIGHT - y) * PIXELS_PER_MM;
 
+function pageCanvas(options) {
   const canvas = document.createElement('canvas');
-  canvas.width = Math.ceil(width * scale);
-  canvas.height = Math.ceil(height * scale);
-  const context = canvas.getContext('2d');
-  // The canvas's y axis points down.
-  const pageX = (x) => (x - minX + MARGIN) * scale;
-  const pageY = (y) => (maxY + MARGIN - y) * scale;
-  const trace = (points, close = false) => {
-    context.beginPath();
-    for (const [x, y] of points) context.lineTo(pageX(x), pageY(y));
-    if (close) context.closePath();
-  };
+  canvas.width = PAGE_WIDTH * PIXELS_PER_MM;
+  canvas.height = PAGE_HEIGHT * PIXELS_PER_MM;
+  return [canvas, canvas.getContext('2d', options)];
+}
 
-  context.fillStyle = '#fff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = TAB_COLOR;
-  for (const outline of tabs) {
-    trace(outline, true);
-    context.fill();
-  }
+// Adds a line through points on the page to the context's path.
+function trace(context, points, close = false) {
+  const [[x0, y0], ...rest] = points;
+  context.moveTo(canvasX(x0), canvasY(y0));
+  for (const [x, y] of rest) context.lineTo(canvasX(x), canvasY(y));
+  if (close) context.closePath();
+}
 
+// Paints each face of a net placed on the page from `atlas`, a canvas holding
+// the painter's texture with its bottom row first.
+function drawFaces(context, { placements, faces }, layout, atlas) {
   // Atlas texels are (originX, originY) + density × face coordinates.
   context.imageSmoothingQuality = 'high';
-  const k = scale / layout.density;
+  const k = PIXELS_PER_MM / layout.density;
   faces.forEach((polygon, f) => {
     const { xx, xy, yx, yy, x, y } = placements[f];
     const {
@@ -219,34 +327,78 @@ export function drawNet({ placements, faces, folds, cuts, tabs }, layout, atlas)
     } = layout.cells[f];
     context.save();
     // Overlaps the neighboring faces by a pixel, so no gap shows between them.
-    trace(grow(polygon, 1 / scale), true);
+    context.beginPath();
+    trace(context, grow(polygon, 1 / PIXELS_PER_MM), true);
     context.clip();
     context.setTransform(
       k * xx,
       -k * yx,
       k * xy,
       -k * yy,
-      pageX(x) - k * (xx * originX + xy * originY),
-      pageY(y) + k * (yx * originX + yy * originY),
+      canvasX(x) - k * (xx * originX + xy * originY),
+      canvasY(y) + k * (yx * originX + yy * originY),
     );
     const [cellWidth, cellHeight] = [right - left, top - bottom];
     context.drawImage(atlas, left, bottom, cellWidth, cellHeight, left, bottom, cellWidth, cellHeight);
     context.restore();
   });
+}
+
+// Draws a net placed on the page, painting each face from `atlas`, a canvas
+// holding the painter's texture with its bottom row first.
+export function drawNet(net, layout, atlas) {
+  const { folds, cuts, tabs } = net;
+  const [canvas, context] = pageCanvas();
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = TAB_COLOR;
+  for (const outline of tabs) {
+    context.beginPath();
+    trace(context, outline, true);
+    context.fill();
+  }
+
+  drawFaces(context, net, layout, atlas);
 
   context.strokeStyle = LINE_COLOR;
-  context.lineWidth = LINE_WIDTH * scale;
+  context.lineWidth = LINE_WIDTH * PIXELS_PER_MM;
   context.lineJoin = 'round';
   context.lineCap = 'round';
   for (const line of cuts) {
-    trace(line);
+    context.beginPath();
+    trace(context, line);
     context.stroke();
   }
-  context.setLineDash(FOLD_DASHES.map((length) => length * scale));
+  context.setLineDash(FOLD_DASHES.map((length) => length * PIXELS_PER_MM));
   context.globalAlpha = 0.5;
   for (const line of folds) {
-    trace(line);
+    context.beginPath();
+    trace(context, line);
     context.stroke();
   }
   return canvas;
+}
+
+// Finds the outlines of the transparent paint on a net placed on the page, in
+// mm, painting its faces from `atlas` as drawNet does. Leaves out specks.
+export function findHoles(net, layout, atlas) {
+  const [canvas, context] = pageCanvas({ willReadFrequently: true });
+  const { width, height } = canvas;
+  drawFaces(context, net, layout, atlas);
+  const paint = context.getImageData(0, 0, width, height).data;
+  // The faces are filled as one, so no seams show between them.
+  context.clearRect(0, 0, width, height);
+  context.beginPath();
+  for (const polygon of net.faces) trace(context, polygon, true);
+  context.fill();
+  const cover = context.getImageData(0, 0, width, height).data;
+
+  // How much of each pixel is a hole: on the net, without paint.
+  const holes = new Float32Array(width * height);
+  for (let i = 0; i < holes.length; i++) holes[i] = (cover[4 * i + 3] * (255 - paint[4 * i + 3])) / 255 ** 2;
+  // Outlines run through pixel centers.
+  const toPage = ([x, y]) => [(x + 0.5) / PIXELS_PER_MM, PAGE_HEIGHT - (y + 0.5) / PIXELS_PER_MM];
+  return traceOutlines(holes, width, height)
+    .map((outline) => simplify(outline, HOLE_TOLERANCE * PIXELS_PER_MM).map(toPage))
+    .filter((outline) => Math.abs(area(outline)) >= MIN_HOLE_AREA);
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { cutFile } from './cutfile.js';
-import { PIXELS_PER_MM, drawNet, findHoles, placeOnPage, unfold } from './net.js';
+import { PIXELS_PER_MM, drawNet, findHoles, netOnPage } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
 import { setPixelsPerMeter } from './png.js';
 import { POLYHEDRA, faceAt } from './polyhedra.js';
@@ -126,7 +126,8 @@ function createSolid(polyhedron, layout) {
 
 const painter = new Painter(renderer);
 const solids = new Map();
-for (const polyhedron of POLYHEDRA) {
+const families = new Map();
+for (const polyhedron of POLYHEDRA.values()) {
   const layout = createAtlasLayout(polyhedron, renderer.capabilities.maxTextureSize);
   const groups = symmetryGroups(polyhedron);
   const solid = {
@@ -145,13 +146,14 @@ for (const polyhedron of POLYHEDRA) {
   solids.set(polyhedron.id, solid);
   scene.add(solid.object);
 
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.textContent = polyhedron.name;
-  button.dataset.id = polyhedron.id;
-  button.addEventListener('click', () => select(polyhedron.id));
-  picker.appendChild(button);
+  if (!families.has(polyhedron.family)) {
+    const family = document.createElement('optgroup');
+    family.label = polyhedron.family;
+    families.set(polyhedron.family, picker.appendChild(family));
+  }
+  families.get(polyhedron.family).appendChild(new Option(polyhedron.name, polyhedron.id));
 }
+picker.addEventListener('change', () => select(picker.value));
 let current = null;
 
 // Rings showing where the brush and all of its symmetric copies will paint.
@@ -202,9 +204,7 @@ function hideCursor() {
 function select(id) {
   current = solids.get(id);
   for (const [solidId, solid] of solids) solid.object.visible = solidId === id;
-  for (const button of picker.children) {
-    button.setAttribute('aria-pressed', String(button.dataset.id === id));
-  }
+  picker.value = id;
   const { polyhedron } = current.painting;
   stats.textContent =
     `${polyhedron.faces.length} faces · ` +
@@ -329,7 +329,7 @@ function download(blob, filename) {
 // out along, holes included, as a DXF that lines up with it.
 exportButton.addEventListener('click', () => {
   const { polyhedron, layout } = current.painting;
-  const net = placeOnPage(unfold(polyhedron));
+  const net = netOnPage(polyhedron);
   const atlas = painter.toCanvas();
   const name = `polypainter-${polyhedron.id}-net`;
   drawNet(net, layout, atlas).toBlob(async (blob) => {

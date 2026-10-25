@@ -410,12 +410,14 @@ export class Painter {
 
   // A dab paints where a ball around the point meets the surface, so it
   // carries on across edges and corners. On each face plane the ball cuts,
-  // that is a disc around the point's projection onto the plane.
+  // that is a disc around the point's projection onto the plane. On solids
+  // that aren't convex, the point can be in front of a face's plane as well
+  // as behind it.
   drawDab(point, { group, color, radius }) {
     const { polyhedron, layout } = this.painting;
     const footprint = [];
     polyhedron.faceFrames.forEach((frame, face) => {
-      const depth = Math.max(frame.offset - frame.normal.dot(point), 0);
+      const depth = Math.abs(frame.offset - frame.normal.dot(point));
       if (depth >= radius) return;
       const [x, y] = toFaceCoordinates(frame, point);
       footprint.push({ face, x, y, radius: Math.sqrt(radius * radius - depth * depth) });

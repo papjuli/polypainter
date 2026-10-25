@@ -1,34 +1,12 @@
-import { Matrix3, Vector3 } from 'three';
-import { PHI, cyclicPermutations, withSigns } from './polyhedra.js';
+import { ICOSAHEDRAL, OCTAHEDRAL, TETRAHEDRAL, isRotation, memberOf } from './groups.js';
 
 const EPSILON = 1e-6;
 
-const isRotation = (matrix) => matrix.determinant() > 0;
-
 const isIdentity = (matrix) =>
   matrix.elements.every((value, i) => Math.abs(value - (i % 4 === 0 ? 1 : 0)) < EPSILON);
-
-// Tests whether a linear map takes a point set to itself.
-function preserves(coordinates) {
-  const points = coordinates.map((c) => new Vector3(...c));
-  return (matrix) =>
-    points.every((point) => {
-      const image = point.clone().applyMatrix3(matrix);
-      return points.some((other) => other.distanceToSquared(image) < EPSILON);
-    });
-}
-
-const preservesTetrahedron = preserves([
-  [1, 1, 1],
-  [1, -1, -1],
-  [-1, 1, -1],
-  [-1, -1, 1],
-]);
-const preservesOctahedron = preserves(cyclicPermutations([1, 0, 0]).flatMap(withSigns));
-const preservesIcosahedron = preserves(cyclicPermutations([0, 1, PHI]).flatMap(withSigns));
-// The icosahedron's vertex pattern with a ratio other than PHI keeps only the
-// pyritohedral symmetries.
-const preservesPyritohedron = preserves(cyclicPermutations([0, 1, 2]).flatMap(withSigns));
+const isTetrahedral = memberOf(TETRAHEDRAL);
+const isOctahedral = memberOf(OCTAHEDRAL);
+const isIcosahedral = memberOf(ICOSAHEDRAL);
 
 // The polyhedral point groups, in Schoenflies and orbifold notation. All
 // solids share the same orientation, so a group is a symmetry group of a
@@ -40,61 +18,46 @@ const NAMED_GROUPS = [
     name: 'Chiral tetrahedral',
     orbifold: '332',
     order: 12,
-    contains: (m) => isRotation(m) && preservesTetrahedron(m),
+    contains: (m) => isRotation(m) && isTetrahedral(m),
   },
-  { id: 'Td', name: 'Full tetrahedral', orbifold: '*332', order: 24, contains: preservesTetrahedron },
-  { id: 'Th', name: 'Pyritohedral', orbifold: '3*2', order: 24, contains: preservesPyritohedron },
+  { id: 'Td', name: 'Full tetrahedral', orbifold: '*332', order: 24, contains: isTetrahedral },
+  {
+    id: 'Th',
+    name: 'Pyritohedral',
+    orbifold: '3*2',
+    order: 24,
+    contains: (m) => isOctahedral(m) && isIcosahedral(m),
+  },
   {
     id: 'O',
     name: 'Chiral octahedral',
     orbifold: '432',
     order: 24,
-    contains: (m) => isRotation(m) && preservesOctahedron(m),
+    contains: (m) => isRotation(m) && isOctahedral(m),
   },
-  { id: 'Oh', name: 'Full octahedral', orbifold: '*432', order: 48, contains: preservesOctahedron },
+  { id: 'Oh', name: 'Full octahedral', orbifold: '*432', order: 48, contains: isOctahedral },
   {
     id: 'I',
     name: 'Chiral icosahedral',
     orbifold: '532',
     order: 60,
-    contains: (m) => isRotation(m) && preservesIcosahedron(m),
+    contains: (m) => isRotation(m) && isIcosahedral(m),
   },
-  { id: 'Ih', name: 'Full icosahedral', orbifold: '*532', order: 120, contains: preservesIcosahedron },
+  { id: 'Ih', name: 'Full icosahedral', orbifold: '*532', order: 120, contains: isIcosahedral },
 ];
 
-// Columns: a face center, one of its vertices, and the next vertex along an edge.
-function flagMatrix(center, vertex, neighbor) {
-  return new Matrix3().set(
-    center.x, vertex.x, neighbor.x,
-    center.y, vertex.y, neighbor.y,
-    center.z, vertex.z, neighbor.z,
+// Every solid's symmetries are among these.
+const CANDIDATES = [...OCTAHEDRAL, ...ICOSAHEDRAL.filter((matrix) => !isOctahedral(matrix))];
+
+// The symmetries of a polyhedron: the candidates that take its vertices to
+// its vertices.
+function fullSymmetryGroup({ vertices }) {
+  return CANDIDATES.filter((matrix) =>
+    vertices.every((vertex) => {
+      const image = vertex.clone().applyMatrix3(matrix);
+      return vertices.some((other) => other.distanceToSquared(image) < EPSILON);
+    }),
   );
-}
-
-// The symmetries of a regular polyhedron act simply transitively on its flags
-// (face, vertex, edge), so there is exactly one symmetry per flag: the linear
-// map taking a reference flag to it.
-function fullSymmetryGroup({ vertices, faces, faceFrames }) {
-  const referenceInverse = flagMatrix(
-    faceFrames[0].center,
-    vertices[faces[0][0]],
-    vertices[faces[0][1]],
-  ).invert();
-
-  const matrices = [];
-  faces.forEach((face, f) => {
-    face.forEach((vertex, i) => {
-      for (const step of [1, -1]) {
-        const neighbor = face[(i + step + face.length) % face.length];
-        matrices.push(
-          flagMatrix(faceFrames[f].center, vertices[vertex], vertices[neighbor]).multiply(
-            referenceInverse,
-          ),
-        );
-      }
-    });
-  });
-  return matrices;
 }
 
 // Where a symmetry takes each face, and the 2x2 matrix taking face coordinates

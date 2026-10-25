@@ -78,11 +78,10 @@ h1 {
 }
 
 .picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px;
+  max-width: 100%;
+  padding: 8px 12px;
   border-radius: 10px;
+  font-size: 15px;
 }
 
 button {
@@ -113,7 +112,6 @@ input:focus-visible {
   outline-offset: 1px;
 }
 
-.picker button[aria-pressed='true'],
 .segmented button[aria-pressed='true'] {
   background: var(--accent);
   color: #fff;

@@ -21,11 +21,23 @@ const FIT_POSITIONS = 9;
 const HOLE_TOLERANCE = 0.02;
 const MIN_HOLE_AREA = 1;
 
-// Glue tabs are trapezoids on one side of every cut edge. Their sides lean in
-// by less than the 36° gap left at a dodecahedron's vertices, the narrowest of
-// the five solids, so a tab never runs into the face across the gap.
+// Nets tried for each solid, the one coming out largest on the page winning,
+// and the most attempts at finding them in one piece.
+const UNFOLDINGS = 12;
+const UNFOLD_ATTEMPTS = 300;
+
+// Glue tabs are trapezoids on one side of every cut edge, TAB_HEIGHT times as
+// tall as the edge is long. The gap between the faces at the end of an edge
+// can be narrow, so their sides rise from the edge at a shallower angle where
+// they have to, which makes them lower, leaving their tops TAB_TOP times as
+// long as the edge.
 const TAB_HEIGHT = 0.15;
-const TAB_ANGLE = (30 * Math.PI) / 180;
+const TAB_TOP = 0.2;
+// The angles tried at the two ends of a tab, steepest first.
+const TAB_ANGLES = [30, 20, 10, 5]
+  .flatMap((a, _, angles) => angles.map((b) => [a, b]))
+  .sort(([a, b], [c, d]) => Math.min(c, d) - Math.min(a, b) || Math.max(c, d) - Math.max(a, b))
+  .map((angles) => angles.map((degrees) => (degrees * Math.PI) / 180));
 // Sizes on the printed page, in mm.
 const LINE_WIDTH = 0.3;
 const FOLD_DASHES = [2.4, 1.8];
@@ -98,8 +110,12 @@ function bounds(points) {
   return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
 }
 
+const boxesOverlap = (a, b) =>
+  a.maxX > b.minX + EPSILON && b.maxX > a.minX + EPSILON && a.maxY > b.minY + EPSILON && b.maxY > a.minY + EPSILON;
+
 // Tests whether two convex polygons overlap by more than touching.
 function overlaps(p, q) {
+  if (!boxesOverlap(bounds(p), bounds(q))) return false;
   for (const polygon of [p, q]) {
     for (let i = 0; i < polygon.length; i++) {
       const [x1, y1] = polygon[i];
@@ -114,29 +130,60 @@ function overlaps(p, q) {
   return true;
 }
 
+// Tests whether two polygons touch along a stretch of their edges.
+function alongside(p, q) {
+  return p.some(([ax, ay], i) => {
+    const [bx, by] = p[(i + 1) % p.length];
+    const length = Math.hypot(bx - ax, by - ay);
+    const across = ([x, y]) => ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / length;
+    const along = ([x, y]) => ((bx - ax) * (x - ax) + (by - ay) * (y - ay)) / length;
+    return q.some((c, j) => {
+      const d = q[(j + 1) % q.length];
+      if (Math.abs(across(c)) > EPSILON || Math.abs(across(d)) > EPSILON) return false;
+      const [start, end] = [along(c), along(d)].sort((s, t) => s - t);
+      return Math.min(end, length) - Math.max(start, 0) > EPSILON;
+    });
+  });
+}
+
 // A glue tab on the outside of the net edge from p to q, which runs
-// counter-clockwise around its face.
-function tab([px, py], [qx, qy]) {
+// counter-clockwise around its face, with its sides rising from the edge at
+// the given angles.
+function tab([px, py], [qx, qy], [startAngle, endAngle]) {
   const length = Math.hypot(qx - px, qy - py);
   const [dx, dy] = [(qx - px) / length, (qy - py) / length];
-  const height = TAB_HEIGHT * length;
-  const inset = height / Math.tan(TAB_ANGLE);
+  const [startRun, endRun] = [1 / Math.tan(startAngle), 1 / Math.tan(endAngle)];
+  const height = Math.min(TAB_HEIGHT, (1 - TAB_TOP) / (startRun + endRun)) * length;
   return [
     [px, py],
-    [px + inset * dx + height * dy, py + inset * dy - height * dx],
-    [qx - inset * dx + height * dy, qy - inset * dy - height * dx],
+    [px + height * (startRun * dx + dy), py + height * (startRun * dy - dx)],
+    [qx + height * (dy - endRun * dx), qy - height * (dx + endRun * dy)],
     [qx, qy],
   ];
 }
 
-// Unfolds a polyhedron into a net by cutting the edges that a breadth-first
-// spanning tree of its faces doesn't cross. No edge unfolding of a Platonic
-// solid overlaps itself, so any spanning tree will do.
+// A pseudo-random number generator, seeded so that a solid unfolds the same
+// way every time.
+function seededRandom(seed) {
+  return () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+}
+
+// Unfolds a polyhedron into pieces of net, growing each breadth first across
+// the edges of its faces and leaving out faces that would overlap it. Faces
+// left out start more pieces. Takes the faces in their own order, or in an
+// order shuffled by `random` when given.
 //
-// Returns each face's placement, mapping its face coordinates into the net,
-// and its corners there. Folds are the segments to fold along, cuts the lines
-// to cut along, and tabs the glue tabs' outlines, all as lists of points.
-export function unfold({ vertices, faces, faceFrames }) {
+// Returns the pieces as lists of faces, each face's placement, mapping its
+// face coordinates into the piece, its corners there, and the edges the net
+// folds along.
+function growPieces({ vertices, faces, faceFrames }, random) {
+  const shuffle = (list) =>
+    random
+      ? list
+          .map((item) => [random(), item])
+          .sort(([a], [b]) => a - b)
+          .map(([, item]) => item)
+      : list;
   const corners = faces.map((face, f) => face.map((i) => toFaceCoordinates(faceFrames[f], vertices[i])));
   const edgesOf = (f) => faces[f].map((a, i) => [i, a, faces[f][(i + 1) % faces[f].length]]);
   // Faces list their vertices counter-clockwise from outside, so the face
@@ -146,60 +193,169 @@ export function unfold({ vertices, faces, faceFrames }) {
     for (const [, a, b] of edgesOf(f)) faceAlong.set(`${a}-${b}`, f);
   });
 
-  const placements = [IDENTITY];
-  const treeEdges = new Set();
-  // Iterating the queue also visits the faces pushed onto it on the way.
-  const queue = [0];
-  for (const f of queue) {
-    for (const [i, a, b] of edgesOf(f)) {
-      const g = faceAlong.get(`${b}-${a}`);
-      if (placements[g]) continue;
-      const j = faces[g].indexOf(b);
-      placements[g] = rigidMap(
-        corners[g][(j + 1) % faces[g].length],
-        corners[g][j],
-        apply(placements[f], corners[f][i]),
-        apply(placements[f], corners[f][(i + 1) % faces[f].length]),
-      );
-      treeEdges.add(`${a}-${b}`).add(`${b}-${a}`);
-      queue.push(g);
+  const pieces = [];
+  const placements = [];
+  const polygons = [];
+  const folds = new Set();
+  for (const root of shuffle(faces.map((_, f) => f))) {
+    if (placements[root]) continue;
+    const piece = [root];
+    [placements[root], polygons[root]] = [IDENTITY, corners[root]];
+    // Iterating the piece also visits the faces pushed onto it on the way.
+    for (const f of piece) {
+      for (const [i, a, b] of shuffle(edgesOf(f))) {
+        const g = faceAlong.get(`${b}-${a}`);
+        if (placements[g]) continue;
+        const j = faces[g].indexOf(b);
+        const placement = rigidMap(
+          corners[g][(j + 1) % faces[g].length],
+          corners[g][j],
+          polygons[f][i],
+          polygons[f][(i + 1) % faces[f].length],
+        );
+        const polygon = corners[g].map((p) => apply(placement, p));
+        // A face lying along an edge of another face, other than the one it
+        // hangs from, would leave no room for a tab between the two.
+        if (piece.some((h) => overlaps(polygon, polygons[h]) || (h !== f && alongside(polygon, polygons[h])))) {
+          continue;
+        }
+        [placements[g], polygons[g]] = [placement, polygon];
+        folds.add(`${a}-${b}`).add(`${b}-${a}`);
+        piece.push(g);
+      }
     }
+    pieces.push(piece);
   }
+  return { pieces, placements, polygons, folds };
+}
 
-  const netFaces = corners.map((points, f) => points.map((p) => apply(placements[f], p)));
-  const segment = (f, i) => [netFaces[f][i], netFaces[f][(i + 1) % faces[f].length]];
+// Lays the pieces of a net out in rows, apart enough for their tabs, each
+// turned to its smallest bounding box, at the row width that lets them come
+// out largest on the page.
+function packPieces({ pieces, placements, polygons, folds }) {
+  const move = (piece, map) => {
+    for (const f of piece) {
+      placements[f] = compose(map, placements[f]);
+      polygons[f] = polygons[f].map((p) => apply(map, p));
+    }
+  };
+  const edges = polygons.flatMap((polygon) =>
+    polygon.map(([x, y], i) => {
+      const [nextX, nextY] = polygon[(i + 1) % polygon.length];
+      return [nextX - x, nextY - y];
+    }),
+  );
+  const gap = 3 * TAB_HEIGHT * Math.max(...edges.map(([dx, dy]) => Math.hypot(dx, dy)));
+  const boxes = pieces.map((piece) => {
+    const points = piece.flatMap((f) => polygons[f]);
+    const turns = piece.flatMap((f) =>
+      polygons[f].map(([x, y], i) => {
+        const [nextX, nextY] = polygons[f][(i + 1) % polygons[f].length];
+        return -Math.atan2(nextY - y, nextX - x);
+      }),
+    );
+    const area = (angle) => {
+      const { minX, maxX, minY, maxY } = bounds(points.map((p) => apply(similarity(angle), p)));
+      return (maxX - minX) * (maxY - minY);
+    };
+    move(
+      piece,
+      similarity(turns.reduce((best, angle) => (area(angle) < area(best) ? angle : best))),
+    );
+    return bounds(piece.flatMap((f) => polygons[f]));
+  });
+
+  // Fills rows left to right, tallest pieces first.
+  const order = pieces.map((_, k) => k).sort((k, l) => boxes[l].maxY - boxes[l].minY - (boxes[k].maxY - boxes[k].minY));
+  const layOut = (width) => {
+    const spots = [];
+    let [x, y, rowHeight, right] = [0, 0, 0, 0];
+    for (const k of order) {
+      const { minX, maxX, minY, maxY } = boxes[k];
+      if (x > 0 && x + maxX - minX > width) [x, y, rowHeight] = [0, y + rowHeight + gap, 0];
+      spots[k] = [x - minX, y - minY];
+      right = Math.max(right, x + maxX - minX);
+      rowHeight = Math.max(rowHeight, maxY - minY);
+      x += maxX - minX + gap;
+    }
+    const [roomX, roomY] = [PAGE_WIDTH - 2 * PAGE_MARGIN, PAGE_HEIGHT - 2 * PAGE_MARGIN];
+    const [w, h] = [right, y + rowHeight];
+    return { spots, fit: Math.max(Math.min(roomX / w, roomY / h), Math.min(roomX / h, roomY / w)) };
+  };
+  // Tries breaking the first row after each piece.
+  const widths = order.map((_, n) =>
+    order.slice(0, n + 1).reduce((sum, k) => sum + boxes[k].maxX - boxes[k].minX + gap, 0),
+  );
+  const { spots } = widths.map(layOut).reduce((best, layout) => (layout.fit > best.fit ? layout : best));
+  pieces.forEach((piece, k) => move(piece, { ...IDENTITY, x: spots[k][0], y: spots[k][1] }));
+  return { placements, polygons, folds };
+}
+
+// Adds the tabs, and sorts the edges of an unfolded polyhedron into those to
+// fold along and those to cut along.
+//
+// Returns each face's placement and its corners in the net. Folds are the
+// segments to fold along, cuts the lines to cut along, and tabs the glue
+// tabs' outlines, all as lists of points.
+function finishNet({ faces }, { placements, polygons, folds: foldEdges }) {
+  const segment = (f, i) => [polygons[f][i], polygons[f][(i + 1) % faces[f].length]];
+  const faceAlong = new Map();
+  faces.forEach((face, f) => face.forEach((a, i) => faceAlong.set(`${a}-${face[(i + 1) % face.length]}`, f)));
   const folds = [];
   const cuts = [];
   const tabs = [];
-  faces.forEach((_, f) => {
-    for (const [i, a, b] of edgesOf(f)) {
+  const taken = polygons.map((polygon) => ({ polygon, box: bounds(polygon) }));
+  const clear = (outline) => {
+    const box = bounds(outline);
+    return !taken.some((other) => boxesOverlap(box, other.box) && overlaps(outline, other.polygon));
+  };
+  faces.forEach((face, f) => {
+    face.forEach((a, i) => {
+      const b = face[(i + 1) % face.length];
       // Takes each edge once, from the face that has it going up.
-      if (a > b) continue;
-      if (treeEdges.has(`${a}-${b}`)) {
+      if (a > b) return;
+      if (foldEdges.has(`${a}-${b}`)) {
         folds.push(segment(f, i));
-        continue;
+        return;
       }
-      // A cut edge is on the outline twice; it gets a tab on the first side
-      // where the tab is clear of the rest of the net.
+      // A cut edge is on the outline twice; it gets the largest tab that is
+      // clear of the rest of the net on either side.
       const g = faceAlong.get(`${b}-${a}`);
       const sides = [segment(f, i), segment(g, faces[g].indexOf(b))];
-      const tabbed = sides.findIndex((side) => {
-        const outline = tab(...side);
-        return ![...netFaces, ...tabs].some((polygon) => overlaps(outline, polygon));
-      });
-      sides.forEach((side, k) => {
-        if (k === tabbed) {
-          tabs.push(tab(...side));
+      let tabbed = null;
+      for (const angles of TAB_ANGLES) {
+        tabbed = sides.map((side) => ({ side, outline: tab(...side, angles) })).find(({ outline }) => clear(outline));
+        if (tabbed) break;
+      }
+      for (const side of sides) {
+        if (side === tabbed?.side) {
+          tabs.push(tabbed.outline);
+          taken.push({ polygon: tabbed.outline, box: bounds(tabbed.outline) });
           folds.push(side);
         } else {
           cuts.push(side);
         }
-      });
-    }
+      }
+    });
   });
   for (const outline of tabs) cuts.push(outline);
 
-  return { placements, faces: netFaces, folds, cuts, tabs };
+  return { placements, faces: polygons, folds, cuts, tabs };
+}
+
+// Unfolds a polyhedron into nets in a few ways, in as few pieces as it can.
+function unfold(polyhedron) {
+  const random = seededRandom(1);
+  let nets = [];
+  for (let attempt = 0; attempt < UNFOLD_ATTEMPTS; attempt++) {
+    // The first attempt takes the faces in their own order.
+    const unfolded = growPieces(polyhedron, attempt === 0 ? null : random);
+    const fewest = nets[0]?.pieces.length ?? Infinity;
+    if (unfolded.pieces.length < fewest) nets = [unfolded];
+    else if (unfolded.pieces.length === fewest && nets.length < UNFOLDINGS) nets.push(unfolded);
+    if (nets.length === UNFOLDINGS && fewest === 1) break;
+  }
+  return nets.map((unfolded) => finishNet(polyhedron, packPieces(unfolded)));
 }
 
 // Where polygons scaled by `scale` fit on the page, inside its margins and
@@ -236,7 +392,7 @@ function findPlace(polygons, scale) {
 }
 
 // Places a net on the page, in mm, turned and scaled to be as large as fits.
-export function placeOnPage({ placements, faces, folds, cuts, tabs }) {
+function placeOnPage({ placements, faces, folds, cuts, tabs }) {
   const polygons = [...faces, ...tabs];
   // Tries the net with each edge of its faces along each side of the page.
   const angles = new Map();
@@ -281,16 +437,33 @@ export function placeOnPage({ placements, faces, folds, cuts, tabs }) {
     folds: folds.map(move),
     cuts: cuts.map(move),
     tabs: tabs.map(move),
+    scale: best.scale,
   };
 }
 
-// Grows a regular polygon outward by `amount`.
+// Unfolds a polyhedron and places it on the page, picking the net that comes
+// out largest there.
+export function netOnPage(polyhedron) {
+  return unfold(polyhedron)
+    .map(placeOnPage)
+    .reduce((best, net) => (net.scale > best.scale ? net : best));
+}
+
+// Grows a convex polygon that runs counter-clockwise outward by `amount`,
+// cutting its corners off, so no point moves further than that.
 function grow(polygon, amount) {
-  const cx = polygon.reduce((sum, [x]) => sum + x, 0) / polygon.length;
-  const cy = polygon.reduce((sum, [, y]) => sum + y, 0) / polygon.length;
-  const [[ax, ay], [bx, by]] = polygon;
-  const factor = 1 + amount / Math.hypot((ax + bx) / 2 - cx, (ay + by) / 2 - cy);
-  return polygon.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
+  const outward = ([ax, ay], [bx, by]) => {
+    const length = Math.hypot(bx - ax, by - ay);
+    return [(amount * (by - ay)) / length, (amount * (ax - bx)) / length];
+  };
+  return polygon.flatMap(([x, y], i) => {
+    const [inX, inY] = outward(polygon.at(i - 1), [x, y]);
+    const [outX, outY] = outward([x, y], polygon[(i + 1) % polygon.length]);
+    return [
+      [x + inX, y + inY],
+      [x + outX, y + outY],
+    ];
+  });
 }
 
 // The canvas's y axis points down.
@@ -314,9 +487,24 @@ function trace(context, points, close = false) {
 
 // Paints each face of a net placed on the page from `atlas`, a canvas holding
 // the painter's texture with its bottom row first.
-function drawFaces(context, { placements, faces }, layout, atlas) {
-  // Atlas texels are (originX, originY) + density × face coordinates.
-  context.imageSmoothingQuality = 'high';
+function drawFaces(context, { placements, faces, scale }, layout, atlas) {
+  // Shrinking an image smoothly is slow to do for every face, so where the
+  // faces come out smaller than in the atlas, it is shrunk to their size once.
+  const shrink = Math.min((PIXELS_PER_MM * scale) / layout.density, 1);
+  let source = atlas;
+  if (shrink < 1) {
+    source = document.createElement('canvas');
+    source.width = Math.ceil(atlas.width * shrink);
+    source.height = Math.ceil(atlas.height * shrink);
+    const sourceContext = source.getContext('2d');
+    sourceContext.imageSmoothingQuality = 'high';
+    sourceContext.drawImage(atlas, 0, 0, atlas.width * shrink, atlas.height * shrink);
+  } else {
+    context.imageSmoothingQuality = 'high';
+  }
+
+  // Atlas texels are (originX, originY) + density × face coordinates, and
+  // those of the source `shrink` times as much.
   const k = PIXELS_PER_MM / layout.density;
   faces.forEach((polygon, f) => {
     const { xx, xy, yx, yy, x, y } = placements[f];
@@ -331,15 +519,15 @@ function drawFaces(context, { placements, faces }, layout, atlas) {
     trace(context, grow(polygon, 1 / PIXELS_PER_MM), true);
     context.clip();
     context.setTransform(
-      k * xx,
-      -k * yx,
-      k * xy,
-      -k * yy,
+      (k * xx) / shrink,
+      (-k * yx) / shrink,
+      (k * xy) / shrink,
+      (-k * yy) / shrink,
       canvasX(x) - k * (xx * originX + xy * originY),
       canvasY(y) + k * (yx * originX + yy * originY),
     );
-    const [cellWidth, cellHeight] = [right - left, top - bottom];
-    context.drawImage(atlas, left, bottom, cellWidth, cellHeight, left, bottom, cellWidth, cellHeight);
+    const cell = [left, bottom, right - left, top - bottom].map((value) => value * shrink);
+    context.drawImage(source, ...cell, ...cell);
     context.restore();
   });
 }

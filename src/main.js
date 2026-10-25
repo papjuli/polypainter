@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { drawNet, unfold } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
 import { POLYHEDRA, faceAt } from './polyhedra.js';
 import { symmetryGroups } from './symmetry.js';
@@ -25,6 +26,7 @@ const undoButton = document.getElementById('undo');
 const redoButton = document.getElementById('redo');
 const clearButton = document.getElementById('clear');
 const showEdges = document.getElementById('show-edges');
+const exportButton = document.getElementById('export-net');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -283,6 +285,18 @@ window.addEventListener('keydown', (event) => {
 
 showEdges.addEventListener('change', () => {
   for (const solid of solids.values()) solid.edgeLines.visible = showEdges.checked;
+});
+
+exportButton.addEventListener('click', () => {
+  const { polyhedron, layout } = current.painting;
+  drawNet(unfold(polyhedron), layout, painter.toCanvas()).toBlob((blob) => {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `polypainter-${polyhedron.id}-net.png`;
+    link.click();
+    // Some browsers start the download only after the click has returned.
+    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  });
 });
 
 resetButton.addEventListener('click', () => controls.reset());

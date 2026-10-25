@@ -249,6 +249,19 @@ export class Painter {
     this.queued = 0;
   }
 
+  // Copies the texture into a 2D canvas, bottom row first like the texture.
+  toCanvas() {
+    this.flush();
+    const { width, height } = this.painting.layout;
+    const pixels = new Uint8ClampedArray(width * height * 4);
+    this.renderer.readRenderTargetPixels(this.target, 0, 0, width, height, pixels);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
+    return canvas;
+  }
+
   record(action) {
     this.painting.history.push(action);
     this.painting.redoStack.length = 0;

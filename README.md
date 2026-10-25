@@ -12,6 +12,8 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   The default is the solid's rotation group, as in Escher's designs.
 - Drag on the solid to paint; strokes carry on across edges and corners. Rings
   show where the brush and all of its copies will land.
+- With the Fill tool, click to fill the area of the color under the pointer,
+  along with its symmetric copies. Fills spread across edges like strokes.
 - Drag around the solid, or right-drag, to rotate it; scroll or pinch to zoom.
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
@@ -39,6 +41,9 @@ npm run build    # production build in dist/
   for undo and when switching solids.
 - `src/net.js` unfolds a solid along a spanning tree of its faces, adds glue
   tabs where they fit, and draws each face from the texture atlas.
+- `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
+  its neighbor's where the fill reaches an edge. A fill is stored as the runs
+  of pixels it covers.
 
 ## Deployment
 

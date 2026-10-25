@@ -10,6 +10,8 @@ const PALETTE = ['#1d1d1f', '#b23a2e', '#e08a3c', '#e9c46a', '#5a8f4e', '#2a9d8f
 // Brush radius per step of the size slider, in world units (the solids have
 // a circumradius of 1).
 const BRUSH_RADIUS_STEP = 0.004;
+// Radius of the rings marking where a bucket fill starts.
+const FILL_CURSOR_RADIUS = 0.02;
 
 const viewport = document.getElementById('viewport');
 const picker = document.getElementById('solid-picker');
@@ -157,7 +159,7 @@ const cursorScale = new THREE.Vector3();
 function showCursor(point) {
   const { polyhedron, group } = current.painting;
   const face = faceAt(polyhedron, point);
-  cursorScale.setScalar(brushRadius());
+  cursorScale.setScalar(tool === 'fill' ? FILL_CURSOR_RADIUS : brushRadius());
   group.elements.forEach(({ matrix, faceMaps }, i) => {
     const normal = polyhedron.faceFrames[faceMaps[face].face].normal;
     const position = point.clone().applyMatrix3(matrix).addScaledVector(normal, 0.002);
@@ -224,7 +226,9 @@ function setTool(name) {
   hint.textContent =
     name === 'rotate'
       ? 'Drag to rotate · Scroll or pinch to zoom'
-      : 'Drag on the solid to paint · Drag around it or right-drag to rotate · Scroll to zoom';
+      : name === 'fill'
+        ? 'Click on the solid to fill an area · Drag around it or right-drag to rotate · Scroll to zoom'
+        : 'Drag on the solid to paint · Drag around it or right-drag to rotate · Scroll to zoom';
   hideCursor();
 }
 
@@ -338,6 +342,11 @@ viewport.addEventListener(
     if (!point) return;
 
     event.stopPropagation();
+    if (tool === 'fill') {
+      runCommand(() => painter.bucketFill(point, { group: current.painting.group, color: brushColor }));
+      showCursor(point);
+      return;
+    }
     strokePointer = event.pointerId;
     viewport.setPointerCapture(event.pointerId);
     painter.beginStroke(point, {

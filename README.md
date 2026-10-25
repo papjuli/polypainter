@@ -16,6 +16,8 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
   own painting.
+- Export net downloads the painted solid unfolded as a PNG, with glue tabs, to
+  print, cut out along the solid lines and fold along the dashed ones.
 
 ## Development
 
@@ -35,6 +37,8 @@ npm run build    # production build in dist/
   dab paints where a small ball meets the surface, and is drawn once for every
   element of the chosen group. Strokes are stored, so the texture can be redrawn
   for undo and when switching solids.
+- `src/net.js` unfolds a solid along a spanning tree of its faces, adds glue
+  tabs where they fit, and draws each face from the texture atlas.
 
 ## Deployment
 

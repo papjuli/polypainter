@@ -185,7 +185,7 @@ select option {
 
 .swatches {
   display: grid;
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -205,6 +205,11 @@ select option {
 
 .swatch.selected {
   box-shadow: 0 0 0 2px var(--text);
+}
+
+/* A checkerboard, the usual sign of transparency. */
+#transparent-color {
+  background: repeating-conic-gradient(#c9c9c9 0 25%, #f5f5f5 0 50%) 50% / 8px 8px;
 }
 
 input[type='color'].swatch {

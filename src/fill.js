@@ -95,9 +95,10 @@ function stepAcross(regions, f, u, v) {
 }
 
 // Finds what a bucket fill covers: the pixels of `pixels`, the atlas as RGBA
-// bytes bottom row first, that connect to a seed through pixels close to its
-// color, crossing from face to face over their edges. Seeds are { face, x, y }
-// in atlas texels. Leaves out seeds already close to `color`, a THREE.Color.
+// bytes with the alpha premultiplied, bottom row first, that connect to a seed
+// through pixels close to its color, crossing from face to face over their
+// edges. Seeds are { face, x, y } in atlas texels. Leaves out seeds already
+// close to `color`, a THREE.Color, or null for transparent paint.
 //
 // Returns the covered pixels as a list of [start, end) runs of pixel indices,
 // with each face's margin in the atlas filled out from its edges.
@@ -105,18 +106,20 @@ export function floodFill(polyhedron, layout, pixels, seeds, color) {
   const { width, height } = layout;
   const regions = faceRegions(polyhedron, layout);
   const mask = new Uint8Array(width * height);
-  const near = (i, [r, g, b]) =>
+  const near = (i, [r, g, b, a]) =>
     Math.abs(pixels[4 * i] - r) <= TOLERANCE &&
     Math.abs(pixels[4 * i + 1] - g) <= TOLERANCE &&
-    Math.abs(pixels[4 * i + 2] - b) <= TOLERANCE;
-  const hex = color.getHex();
-  const fillColor = [hex >> 16, (hex >> 8) & 255, hex & 255];
+    Math.abs(pixels[4 * i + 2] - b) <= TOLERANCE &&
+    Math.abs(pixels[4 * i + 3] - a) <= TOLERANCE;
+  // With the alpha premultiplied, transparent paint is zero in every channel.
+  const hex = color?.getHex() ?? 0;
+  const fillColor = [hex >> 16, (hex >> 8) & 255, hex & 255, color ? 255 : 0];
 
   for (const seed of seeds) {
     const [u, v] = clampInto(regions[seed.face], Math.floor(seed.x), Math.floor(seed.y));
     const start = v * width + u;
     if (mask[start] || near(start, fillColor)) continue;
-    const target = [pixels[4 * start], pixels[4 * start + 1], pixels[4 * start + 2]];
+    const target = [pixels[4 * start], pixels[4 * start + 1], pixels[4 * start + 2], pixels[4 * start + 3]];
 
     mask[start] = 1;
     const stack = [seed.face, start];

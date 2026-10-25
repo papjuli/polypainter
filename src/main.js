@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { drawNet, unfold } from './net.js';
+import { cutFile } from './cutfile.js';
+import { PIXELS_PER_MM, drawNet, findHoles, placeOnPage, unfold } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
+import { setPixelsPerMeter } from './png.js';
 import { POLYHEDRA, faceAt } from './polyhedra.js';
 import { symmetryGroups } from './symmetry.js';
 import './style.css';
@@ -12,6 +14,9 @@ const PALETTE = ['#1d1d1f', '#b23a2e', '#e08a3c', '#e9c46a', '#5a8f4e', '#2a9d8f
 const BRUSH_RADIUS_STEP = 0.004;
 // Radius of the rings marking where a bucket fill starts.
 const FILL_CURSOR_RADIUS = 0.02;
+// Brightness of the solid's inside, which shows through transparent paint,
+// relative to its outside.
+const INSIDE_BRIGHTNESS = 0.6;
 
 const viewport = document.getElementById('viewport');
 const picker = document.getElementById('solid-picker');
@@ -22,6 +27,7 @@ const symmetrySelect = document.getElementById('symmetry');
 const symmetryNote = document.getElementById('symmetry-note');
 const toolPicker = document.getElementById('tool-picker');
 const swatches = document.getElementById('swatches');
+const transparentSwatch = document.getElementById('transparent-color');
 const customColor = document.getElementById('custom-color');
 const brushSize = document.getElementById('brush-size');
 const undoButton = document.getElementById('undo');
@@ -63,11 +69,28 @@ const faceMaterial = new THREE.MeshStandardMaterial({
   flatShading: true,
   roughness: 0.8,
   metalness: 0,
+  // Transparent paint cuts holes, through which the inside of the far faces
+  // shows.
+  side: THREE.DoubleSide,
+  alphaTest: 0.5,
+  alphaToCoverage: true,
   // Push faces back slightly so the edge lines drawn on top don't flicker.
   polygonOffset: true,
   polygonOffsetFactor: 1,
   polygonOffsetUnits: 1,
 });
+// The painter's texture has its alpha premultiplied, which the material
+// doesn't expect, so it is divided out again.
+faceMaterial.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <map_fragment>',
+    /* glsl */ `
+      vec4 paint = texture2D(map, vMapUv);
+      diffuseColor *= vec4(paint.rgb / max(paint.a, 1e-3), paint.a);
+      if (!gl_FrontFacing) diffuseColor.rgb *= ${INSIDE_BRIGHTNESS.toFixed(2)};
+    `,
+  );
+};
 const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1d1d1f, transparent: true, opacity: 0.35 });
 
 function createSolid(polyhedron, layout) {
@@ -236,10 +259,11 @@ for (const button of toolPicker.children) {
   button.addEventListener('click', () => setTool(button.dataset.tool));
 }
 
-const brushColor = new THREE.Color();
+// A THREE.Color, or null to paint transparent.
+let brushColor = null;
 
-function setColor(hex, swatch) {
-  brushColor.set(hex);
+function setColor(color, swatch) {
+  brushColor = color;
   for (const element of swatches.children) {
     element.classList.toggle('selected', element === swatch);
     if (element instanceof HTMLButtonElement) element.setAttribute('aria-pressed', String(element === swatch));
@@ -253,10 +277,11 @@ for (const hex of PALETTE) {
   swatch.className = 'swatch';
   swatch.style.background = hex;
   swatch.setAttribute('aria-label', `Color ${hex}`);
-  swatch.addEventListener('click', () => setColor(hex, swatch));
-  swatches.insertBefore(swatch, customColor);
+  swatch.addEventListener('click', () => setColor(new THREE.Color(hex), swatch));
+  swatches.insertBefore(swatch, transparentSwatch);
 }
-customColor.addEventListener('input', () => setColor(customColor.value, customColor));
+transparentSwatch.addEventListener('click', () => setColor(null, transparentSwatch));
+customColor.addEventListener('input', () => setColor(new THREE.Color(customColor.value), customColor));
 
 const brushRadius = () => Number(brushSize.value) * BRUSH_RADIUS_STEP;
 
@@ -291,15 +316,26 @@ showEdges.addEventListener('change', () => {
   for (const solid of solids.values()) solid.edgeLines.visible = showEdges.checked;
 });
 
+function download(blob, filename) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  // Some browsers start the download only after the click has returned.
+  setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+}
+
+// Downloads the net on an A4 page as a PNG to print, and the lines to cut it
+// out along, holes included, as a DXF that lines up with it.
 exportButton.addEventListener('click', () => {
   const { polyhedron, layout } = current.painting;
-  drawNet(unfold(polyhedron), layout, painter.toCanvas()).toBlob((blob) => {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `polypainter-${polyhedron.id}-net.png`;
-    link.click();
-    // Some browsers start the download only after the click has returned.
-    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  const net = placeOnPage(unfold(polyhedron));
+  const atlas = painter.toCanvas();
+  const name = `polypainter-${polyhedron.id}-net`;
+  drawNet(net, layout, atlas).toBlob(async (blob) => {
+    download(await setPixelsPerMeter(blob, PIXELS_PER_MM * 1000), `${name}.png`);
+    const dxf = cutFile(net, findHoles(net, layout, atlas));
+    download(new Blob([dxf], { type: 'application/dxf' }), `${name}.dxf`);
   });
 });
 
@@ -395,7 +431,7 @@ function resize() {
 new ResizeObserver(resize).observe(viewport);
 resize();
 
-setColor(PALETTE[0], swatches.children[0]);
+setColor(new THREE.Color(PALETTE[0]), swatches.children[0]);
 setTool('paint');
 select('cube');
 

@@ -14,12 +14,15 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   show where the brush and all of its copies will land.
 - With the Fill tool, click to fill the area of the color under the pointer,
   along with its symmetric copies. Fills spread across edges like strokes.
+- The checkered swatch paints and fills transparently, cutting holes through
+  which the inside of the solid shows. Paint over a hole to close it again.
 - Drag around the solid, or right-drag, to rotate it; scroll or pinch to zoom.
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
   own painting.
 - Export net downloads the painted solid unfolded as a PNG, with glue tabs, to
   print, cut out along the solid lines and fold along the dashed ones.
+  Transparent areas are left blank.
 
 ## Development
 
@@ -38,7 +41,8 @@ npm run build    # production build in dist/
 - `src/painter.js` keeps the paint in a texture atlas with one cell per face. A
   dab paints where a small ball meets the surface, and is drawn once for every
   element of the chosen group. Strokes are stored, so the texture can be redrawn
-  for undo and when switching solids.
+  for undo and when switching solids. The texture keeps its alpha premultiplied,
+  so the edges of transparent paint blend as cleanly as those of colors.
 - `src/net.js` unfolds a solid along a spanning tree of its faces, adds glue
   tabs where they fit, and draws each face from the texture atlas.
 - `src/fill.js` flood fills the texture atlas, stepping from a face's cell to

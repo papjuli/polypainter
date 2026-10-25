@@ -14,6 +14,19 @@ const BATCH_SIZE = 8192;
 
 export const BASE_COLOR = new THREE.Color('#f3efe6');
 
+// The texture holds colors with their alpha premultiplied. Paint goes over
+// what's there, and transparent paint takes it away, both in proportion to
+// their coverage.
+const paintBlending = {
+  blending: THREE.CustomBlending,
+  blendSrc: THREE.OneFactor,
+  blendDst: THREE.OneMinusSrcAlphaFactor,
+};
+
+function setPaintBlending(material, transparent) {
+  material.blendSrc = transparent ? THREE.ZeroFactor : THREE.OneFactor;
+}
+
 export function createAtlasLayout({ vertices, faces, faceFrames }, maxTextureSize) {
   let minX = Infinity;
   let maxX = -Infinity;
@@ -102,7 +115,7 @@ const dabShader = {
       if (any(lessThan(vPosition, vRect.xy)) || any(greaterThan(vPosition, vRect.zw))) discard;
       float coverage = clamp(vRadius - distance(vPosition, vCenter) + 0.5, 0.0, 1.0);
       if (coverage == 0.0) discard;
-      gl_FragColor = vec4(vColor, coverage);
+      gl_FragColor = vec4(vColor * coverage, coverage);
     }
   `,
 };
@@ -128,7 +141,8 @@ const bucketShader = {
     varying vec2 vUv;
 
     void main() {
-      gl_FragColor = vec4(color, texture2D(mask, vUv).r);
+      float coverage = texture2D(mask, vUv).r;
+      gl_FragColor = vec4(color * coverage, coverage);
     }
   `,
 };
@@ -146,6 +160,7 @@ export class Painter {
     this.stroke = null;
     this.lastDab = null;
     this.queued = 0;
+    this.queuedTransparent = false;
 
     this.attributes = {
       dabCenter: new THREE.InstancedBufferAttribute(new Float32Array(BATCH_SIZE * 2), 2),
@@ -160,7 +175,7 @@ export class Painter {
     }
     this.dabs = new THREE.Mesh(
       geometry,
-      new THREE.ShaderMaterial({ ...dabShader, transparent: true, depthTest: false, depthWrite: false }),
+      new THREE.ShaderMaterial({ ...dabShader, ...paintBlending, transparent: true, depthTest: false, depthWrite: false }),
     );
     this.dabs.frustumCulled = false;
     this.scene = new THREE.Scene();
@@ -169,7 +184,7 @@ export class Painter {
 
     this.bucket = new THREE.Mesh(
       new THREE.PlaneGeometry(2, 2),
-      new THREE.ShaderMaterial({ ...bucketShader, transparent: true, depthTest: false, depthWrite: false }),
+      new THREE.ShaderMaterial({ ...bucketShader, ...paintBlending, transparent: true, depthTest: false, depthWrite: false }),
     );
     this.bucket.frustumCulled = false;
     this.bucketScene = new THREE.Scene();
@@ -212,9 +227,9 @@ export class Painter {
   }
 
   // `group` is the symmetry group that repeats the stroke; `radius` is in
-  // world units, `color` a linear THREE.Color.
+  // world units, `color` a linear THREE.Color, or null to paint transparent.
   beginStroke(point, { group, color, radius }) {
-    this.stroke = { type: 'stroke', group, color: color.clone(), radius, points: [] };
+    this.stroke = { type: 'stroke', group, color: color?.clone() ?? null, radius, points: [] };
     this.lastDab = null;
     this.extendStroke(point);
   }
@@ -246,7 +261,8 @@ export class Painter {
   }
 
   // Fills the area of about the same color around the point, and the areas
-  // around its images under `group`. `color` is a linear THREE.Color.
+  // around its images under `group`. `color` is a linear THREE.Color, or null
+  // to fill with transparent paint.
   bucketFill(point, { group, color }) {
     const { polyhedron, layout } = this.painting;
     const face = faceAt(polyhedron, point);
@@ -262,7 +278,7 @@ export class Painter {
     });
     const runs = floodFill(polyhedron, layout, this.readPixels(), seeds, color);
     if (runs.length === 0) return;
-    const action = { type: 'bucket', color: color.clone(), runs };
+    const action = { type: 'bucket', color: color?.clone() ?? null, runs };
     this.record(action);
     this.apply(action);
   }
@@ -295,6 +311,7 @@ export class Painter {
       attribute.needsUpdate = true;
     }
     this.dabs.geometry.instanceCount = this.queued;
+    setPaintBlending(this.dabs.material, this.queuedTransparent);
     this.drawOver(this.scene);
     this.queued = 0;
   }
@@ -310,7 +327,8 @@ export class Painter {
     renderer.autoClear = autoClear;
   }
 
-  // The texture's pixels as RGBA bytes, bottom row first.
+  // The texture's pixels as RGBA bytes with the alpha premultiplied, bottom
+  // row first.
   readPixels() {
     this.flush();
     const { width, height } = this.painting.layout;
@@ -323,6 +341,16 @@ export class Painter {
   toCanvas() {
     const { width, height } = this.painting.layout;
     const pixels = new Uint8ClampedArray(this.readPixels().buffer);
+    // The canvas takes colors without the alpha premultiplied, so it is
+    // divided out of the partly transparent rims of transparent paint.
+    const color = new THREE.Color();
+    for (let i = 0; i < pixels.length; i += 4) {
+      const alpha = pixels[i + 3];
+      if (alpha === 0 || alpha === 255) continue;
+      color.setRGB(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255, THREE.SRGBColorSpace);
+      const hex = color.multiplyScalar(255 / alpha).getHex();
+      pixels.set([hex >> 16, (hex >> 8) & 255, hex & 255], i);
+    }
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -361,9 +389,10 @@ export class Painter {
     for (let i = 0; i < runs.length; i += 2) mask.fill(255, runs[i], runs[i + 1]);
     const texture = new THREE.DataTexture(mask, width, height, THREE.RedFormat);
     texture.needsUpdate = true;
-    const { uniforms } = this.bucket.material;
-    uniforms.mask.value = texture;
-    uniforms.color.value.copy(color);
+    const { material } = this.bucket;
+    material.uniforms.mask.value = texture;
+    if (color !== null) material.uniforms.color.value.copy(color);
+    setPaintBlending(material, color === null);
     this.drawOver(this.bucketScene);
     texture.dispose();
   }
@@ -408,12 +437,16 @@ export class Painter {
   }
 
   queueDab(x, y, radius, color, rect) {
-    if (this.queued === BATCH_SIZE) this.flush();
+    // Transparent dabs blend differently, so they are drawn in batches of
+    // their own.
+    const transparent = color === null;
+    if (this.queued === BATCH_SIZE || (this.queued > 0 && transparent !== this.queuedTransparent)) this.flush();
+    this.queuedTransparent = transparent;
     const i = this.queued++;
     const { dabCenter, dabRadius, dabColor, dabRect } = this.attributes;
     dabCenter.setXY(i, x, y);
     dabRadius.setX(i, radius);
-    dabColor.setXYZ(i, color.r, color.g, color.b);
+    if (!transparent) dabColor.setXYZ(i, color.r, color.g, color.b);
     dabRect.setXYZW(i, ...rect);
   }
 }

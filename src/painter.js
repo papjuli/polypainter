@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { projectToSurface, toFaceCoordinates } from './polyhedra.js';
+import { floodFill } from './fill.js';
+import { faceAt, projectToSurface, toFaceCoordinates } from './polyhedra.js';
 
 // The paint lives in a texture atlas with one cell per face.
 const TEXELS_PER_UNIT = 640;
@@ -106,11 +107,37 @@ const dabShader = {
   `,
 };
 
+// Draws a bucket fill over the whole atlas: its color wherever the mask is set.
+const bucketShader = {
+  uniforms: {
+    mask: { value: null },
+    color: { value: new THREE.Color() },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position.xy, 0.0, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D mask;
+    uniform vec3 color;
+
+    varying vec2 vUv;
+
+    void main() {
+      gl_FragColor = vec4(color, texture2D(mask, vUv).r);
+    }
+  `,
+};
+
 // Paints on a polyhedron's surface, repeating every dab by a symmetry group.
 //
 // A painting is { polyhedron, layout, history, redoStack }, where the history
-// holds strokes and clears. The texture is only a rendering of the history, so
-// switching paintings, undoing and redoing all redraw from it.
+// holds strokes, bucket fills and clears. The texture is only a rendering of
+// the history, so switching paintings, undoing and redoing all redraw from it.
 export class Painter {
   constructor(renderer) {
     this.renderer = renderer;
@@ -139,6 +166,14 @@ export class Painter {
     this.scene = new THREE.Scene();
     this.scene.add(this.dabs);
     this.camera = new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1);
+
+    this.bucket = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.ShaderMaterial({ ...bucketShader, transparent: true, depthTest: false, depthWrite: false }),
+    );
+    this.bucket.frustumCulled = false;
+    this.bucketScene = new THREE.Scene();
+    this.bucketScene.add(this.bucket);
   }
 
   get texture() {
@@ -154,7 +189,7 @@ export class Painter {
   }
 
   get canClear() {
-    return this.painting.history.at(-1)?.type === 'stroke';
+    return (this.painting.history.at(-1)?.type ?? 'clear') !== 'clear';
   }
 
   // Switches to another painting, with a texture of its own.
@@ -210,6 +245,28 @@ export class Painter {
     this.stroke = null;
   }
 
+  // Fills the area of about the same color around the point, and the areas
+  // around its images under `group`. `color` is a linear THREE.Color.
+  bucketFill(point, { group, color }) {
+    const { polyhedron, layout } = this.painting;
+    const face = faceAt(polyhedron, point);
+    const [x, y] = toFaceCoordinates(polyhedron.faceFrames[face], point);
+    const seeds = group.elements.map(({ faceMaps }) => {
+      const { face: image, xx, xy, yx, yy } = faceMaps[face];
+      const { originX, originY } = layout.cells[image];
+      return {
+        face: image,
+        x: originX + (xx * x + xy * y) * layout.density,
+        y: originY + (yx * x + yy * y) * layout.density,
+      };
+    });
+    const runs = floodFill(polyhedron, layout, this.readPixels(), seeds, color);
+    if (runs.length === 0) return;
+    const action = { type: 'bucket', color: color.clone(), runs };
+    this.record(action);
+    this.apply(action);
+  }
+
   clear() {
     const action = { type: 'clear' };
     this.record(action);
@@ -238,15 +295,28 @@ export class Painter {
       attribute.needsUpdate = true;
     }
     this.dabs.geometry.instanceCount = this.queued;
+    this.drawOver(this.scene);
+    this.queued = 0;
+  }
 
+  // Renders a scene on top of the texture.
+  drawOver(scene) {
     const { renderer } = this;
     const autoClear = renderer.autoClear;
     renderer.autoClear = false;
     renderer.setRenderTarget(this.target);
-    renderer.render(this.scene, this.camera);
+    renderer.render(scene, this.camera);
     renderer.setRenderTarget(null);
     renderer.autoClear = autoClear;
-    this.queued = 0;
+  }
+
+  // The texture's pixels as RGBA bytes, bottom row first.
+  readPixels() {
+    this.flush();
+    const { width, height } = this.painting.layout;
+    const pixels = new Uint8Array(width * height * 4);
+    this.renderer.readRenderTargetPixels(this.target, 0, 0, width, height, pixels);
+    return pixels;
   }
 
   // Copies the texture into a 2D canvas, bottom row first like the texture.
@@ -277,9 +347,27 @@ export class Painter {
   apply(action) {
     if (action.type === 'clear') {
       this.fill();
+    } else if (action.type === 'bucket') {
+      this.drawBucket(action);
     } else {
       for (const point of action.points) this.drawDab(point, action);
     }
+  }
+
+  // `runs` lists the filled pixels as [start, end) ranges of pixel indices.
+  drawBucket({ color, runs }) {
+    // Draws the dabs queued so far first, so they end up under the fill.
+    this.flush();
+    const { width, height } = this.painting.layout;
+    const mask = new Uint8Array(width * height);
+    for (let i = 0; i < runs.length; i += 2) mask.fill(255, runs[i], runs[i + 1]);
+    const texture = new THREE.DataTexture(mask, width, height, THREE.RedFormat);
+    texture.needsUpdate = true;
+    const { uniforms } = this.bucket.material;
+    uniforms.mask.value = texture;
+    uniforms.color.value.copy(color);
+    this.drawOver(this.bucketScene);
+    texture.dispose();
   }
 
   addDab(point) {

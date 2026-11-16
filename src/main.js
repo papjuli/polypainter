@@ -325,18 +325,46 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
 }
 
-// Downloads the net on an A4 page as a PNG to print, and the lines to cut it
-// out along, holes included, as a DXF that lines up with it.
+const exportDialog = document.getElementById('export-dialog');
+const exportForm = document.getElementById('export-form');
+const exportStatus = document.getElementById('export-status');
+let exporting = false;
 exportButton.addEventListener('click', () => {
+  exportStatus.textContent = '';
+  exportDialog.showModal();
+});
+document.getElementById('export-cancel').addEventListener('click', () => exportDialog.close());
+exportDialog.addEventListener('cancel', (event) => {
+  if (exporting) event.preventDefault();
+});
+exportForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (exporting) return;
+  const assembly = document.getElementById('assembly-method').value;
+  const includeCutter = document.getElementById('export-cutter').checked;
   const { polyhedron, layout } = current.painting;
-  const net = netOnPage(polyhedron);
-  const atlas = painter.toCanvas();
-  const name = `polypainter-${polyhedron.id}-net`;
-  drawNet(net, layout, atlas).toBlob(async (blob) => {
-    download(await setPixelsPerMeter(blob, PIXELS_PER_MM * 1000), `${name}.png`);
-    const dxf = cutFile(net, findHoles(net, layout, atlas));
-    download(new Blob([dxf], { type: 'application/dxf' }), `${name}.dxf`);
-  });
+  exporting = true;
+  const inputs = [...exportForm.querySelectorAll('button, select, input')];
+  inputs.forEach((input) => { input.disabled = true; });
+  exportStatus.textContent = 'Preparing your net…';
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const net = netOnPage(polyhedron, { assembly });
+    const atlas = painter.toCanvas();
+    const name = 'polypainter-' + polyhedron.id + '-net' + (assembly === 'interlocking' ? '-interlocking' : '');
+    const blob = await new Promise((resolve) => drawNet(net, layout, atlas).toBlob(resolve));
+    if (!blob) throw new Error('Could not create the print image.');
+    const png = await setPixelsPerMeter(blob, PIXELS_PER_MM * 1000);
+    const dxf = includeCutter ? cutFile(net, findHoles(net, layout, atlas)) : null;
+    download(png, name + '.png');
+    if (dxf !== null) download(new Blob([dxf], { type: 'application/dxf' }), name + '.dxf');
+    exportDialog.close();
+  } catch (error) {
+    exportStatus.textContent = 'Export failed: ' + error.message;
+  } finally {
+    exporting = false;
+    inputs.forEach((input) => { input.disabled = false; });
+  }
 });
 
 resetButton.addEventListener('click', () => controls.reset());

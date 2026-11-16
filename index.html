@@ -51,7 +51,7 @@
 
       <label class="checkbox"><input id="show-edges" type="checkbox" checked /> Show edges</label>
 
-      <button id="export-net" type="button" title="Download the solid unfolded on an A4 page to print, with a DXF of the lines to cut">
+      <button id="export-net" type="button" aria-haspopup="dialog" aria-controls="export-dialog">
         Export net
       </button>
     </aside>
@@ -62,6 +62,26 @@
       <button id="reset-view" type="button">Reset view</button>
     </footer>
 
+    <dialog id="export-dialog" aria-labelledby="export-title">
+      <form id="export-form">
+        <h2 id="export-title">Export net</h2>
+        <div class="field">
+          <label for="assembly-method">Assembly method</label>
+          <select id="assembly-method">
+            <option value="glue">Glue tabs (original)</option>
+            <option value="interlocking">Interlocking tabs (no glue)</option>
+          </select>
+          <p class="note">Cut the two slits along the base of each wide tab, fold it inward, and flex the two matching tongues through the slits. Tight nets may export as separate pieces.</p>
+        </div>
+        <label class="checkbox"><input id="export-cutter" type="checkbox" checked /> Include cutter file (DXF)</label>
+        <p class="note">A4 print image (PNG) is always included. Print at 100% scale. Solid lines are cuts; dashed lines are folds.</p>
+        <p id="export-status" class="note" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button id="export-cancel" type="button">Cancel</button>
+          <button id="export-download" type="submit">Download</button>
+        </div>
+      </form>
+    </dialog>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

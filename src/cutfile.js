@@ -48,7 +48,7 @@ function perforate([[ax, ay], [bx, by]]) {
 // the outlines of `holes`, polygons where the paint is transparent, the net's
 // outline, perforations along its folds, and a frame around the whole page,
 // by which the lines can be lined up with the printed page.
-export function cutFile({ folds, cuts }, holes) {
+export function cutFile({ folds, cuts, slits = [] }, holes) {
   const groups = [];
   const entity = (type, layer, ...values) => groups.push(0, type, 8, layer, 62, LAYER_COLORS[layer], ...values);
   const polyline = (layer, points, closed) => {
@@ -60,6 +60,8 @@ export function cutFile({ folds, cuts }, holes) {
   // Holes come first, so that they are cut while the net is still held in
   // place by the paper around it.
   for (const hole of holes) polyline('CUT', hole, true);
+  // Cut slots before releasing the surrounding tabs from the sheet.
+  for (const slit of slits) polyline('CUT', slit, false);
   for (const { points, closed } of joinUp(cuts)) polyline('CUT', points, closed);
   for (const fold of folds) {
     for (const [[ax, ay], [bx, by]] of perforate(fold)) {

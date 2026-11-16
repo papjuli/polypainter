@@ -331,3 +331,47 @@ input[type='range'] {
     padding: 12px 16px;
   }
 }
+
+#export-dialog {
+  width: min(400px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  padding: 24px;
+  color: var(--text);
+  background: #1e212a;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+#export-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+#export-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+#export-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+#export-dialog .note,
+#export-dialog .field > label {
+  display: block;
+}
+
+#export-dialog .note {
+  line-height: 1.5;
+}
+
+#export-status:empty {
+  display: none;
+}
+
+#export-download {
+  background: var(--accent);
+  color: white;
+}

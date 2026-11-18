@@ -35,6 +35,9 @@ const redoButton = document.getElementById('redo');
 const clearButton = document.getElementById('clear');
 const showEdges = document.getElementById('show-edges');
 const exportButton = document.getElementById('export-net');
+const exportDialog = document.getElementById('export-dialog');
+const exportForm = document.getElementById('export-form');
+const exportStatus = document.getElementById('export-status');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -304,7 +307,9 @@ redoButton.addEventListener('click', () => runCommand(() => painter.redo()));
 clearButton.addEventListener('click', () => runCommand(() => painter.clear()));
 
 window.addEventListener('keydown', (event) => {
-  if (!(event.ctrlKey || event.metaKey)) return;
+  // The painting behind the export dialog stays as it is while the dialog is
+  // open, so the net exports what the user saw.
+  if (exportDialog.open || !(event.ctrlKey || event.metaKey)) return;
   const key = event.key.toLowerCase();
   if (key === 'z' && !event.shiftKey) runCommand(() => painter.undo());
   else if (key === 'y' || (key === 'z' && event.shiftKey)) runCommand(() => painter.redo());
@@ -325,9 +330,6 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
 }
 
-const exportDialog = document.getElementById('export-dialog');
-const exportForm = document.getElementById('export-form');
-const exportStatus = document.getElementById('export-status');
 let exporting = false;
 exportButton.addEventListener('click', () => {
   exportStatus.textContent = '';
@@ -336,6 +338,13 @@ exportButton.addEventListener('click', () => {
 document.getElementById('export-cancel').addEventListener('click', () => exportDialog.close());
 exportDialog.addEventListener('cancel', (event) => {
   if (exporting) event.preventDefault();
+});
+// Chrome ignores preventDefault on the cancel event when Escape is pressed
+// again without the user having clicked in between, so while exporting the
+// key itself is stopped. Disabling the focused button moves focus out of the
+// dialog, so this listens on the whole document.
+document.addEventListener('keydown', (event) => {
+  if (exporting && event.key === 'Escape') event.preventDefault();
 });
 exportForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -347,20 +356,30 @@ exportForm.addEventListener('submit', async (event) => {
   const inputs = [...exportForm.querySelectorAll('button, select, input')];
   inputs.forEach((input) => { input.disabled = true; });
   exportStatus.textContent = 'Preparing your net…';
+  let pngSaved = false;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Wait for the next frame to be painted, so the status and the disabled
+    // controls show before the work below blocks the page.
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
     const net = netOnPage(polyhedron, { assembly });
     const atlas = painter.toCanvas();
     const name = 'polypainter-' + polyhedron.id + '-net' + (assembly === 'interlocking' ? '-interlocking' : '');
     const blob = await new Promise((resolve) => drawNet(net, layout, atlas).toBlob(resolve));
     if (!blob) throw new Error('Could not create the print image.');
-    const png = await setPixelsPerMeter(blob, PIXELS_PER_MM * 1000);
-    const dxf = includeCutter ? cutFile(net, findHoles(net, layout, atlas)) : null;
-    download(png, name + '.png');
-    if (dxf !== null) download(new Blob([dxf], { type: 'application/dxf' }), name + '.dxf');
+    // The PNG is saved first, so a failure in the cutter file doesn't lose it.
+    download(await setPixelsPerMeter(blob, PIXELS_PER_MM * 1000), name + '.png');
+    pngSaved = true;
+    if (includeCutter) {
+      const dxf = cutFile(net, findHoles(net, layout, atlas));
+      download(new Blob([dxf], { type: 'application/dxf' }), name + '.dxf');
+    }
     exportDialog.close();
   } catch (error) {
-    exportStatus.textContent = 'Export failed: ' + error.message;
+    exportStatus.textContent =
+      (pngSaved ? 'The PNG was saved, but the cutter file failed: ' : 'Export failed: ') + error.message;
+    // A close request that couldn't be stopped, such as the Android back
+    // button, may have closed the dialog, so it is shown again with the error.
+    if (!exportDialog.open) exportDialog.showModal();
   } finally {
     exporting = false;
     inputs.forEach((input) => { input.disabled = false; });

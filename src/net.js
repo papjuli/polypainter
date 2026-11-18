@@ -148,6 +148,11 @@ function alongside(p, q) {
   });
 }
 
+// The height of a glue tab whose sides rise at the given angles, relative to
+// the length of its edge.
+const tabHeight = ([startAngle, endAngle]) =>
+  Math.min(TAB_HEIGHT, (1 - TAB_TOP) / (1 / Math.tan(startAngle) + 1 / Math.tan(endAngle)));
+
 // A glue tab on the outside of the net edge from p to q, which runs
 // counter-clockwise around its face, with its sides rising from the edge at
 // the given angles.
@@ -155,7 +160,7 @@ function tab([px, py], [qx, qy], [startAngle, endAngle]) {
   const length = Math.hypot(qx - px, qy - py);
   const [dx, dy] = [(qx - px) / length, (qy - py) / length];
   const [startRun, endRun] = [1 / Math.tan(startAngle), 1 / Math.tan(endAngle)];
-  const height = Math.min(TAB_HEIGHT, (1 - TAB_TOP) / (startRun + endRun)) * length;
+  const height = tabHeight([startAngle, endAngle]) * length;
   return [
     [px, py],
     [px + height * (startRun * dx + dy), py + height * (startRun * dy - dx)],
@@ -174,11 +179,9 @@ function interlock([p, q], [r, s], angles = TAB_ANGLES[0]) {
   const outline = [[0.38, 0], [0.38, 0.12], [0.62, 0.12], [0.62, 0]]
     .map(([u, v]) => point([r, s], u, v));
   const receiver = tab(p, q, angles);
-  const [dx, dy] = [q[0] - p[0], q[1] - p[1]];
-  const height = (dy * (receiver[1][0] - p[0]) - dx * (receiver[1][1] - p[1])) / (dx * dx + dy * dy);
   // The PNG adds short perpendicular ends entirely in the receiver tab.
   // Keep them shorter where the tab is shallow; the cutter slit stays straight.
-  const endLength = Math.min(0.03, height / 4);
+  const endLength = Math.min(0.03, tabHeight(angles) / 4);
   const slit = [[0.37, endLength], [0.37, 0], [0.63, 0], [0.63, endLength]]
     .map(([u, v]) => point([p, q], u, v));
   return {

@@ -38,8 +38,9 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   the lines to cut for a cutting machine: the outline, holes where the paint
   is transparent, and perforated folds, with a frame the size of the page.
   Where a solid can't be unfolded in one piece with room for every connector,
-  as with the great dodecahedron and great stellated dodecahedron, the net
-  comes in a few pieces.
+  the net comes in a few pieces. With glue tabs, this happens only for the
+  great dodecahedron and great stellated dodecahedron. Rectangular tabs need
+  more room, so with them most solids come in several pieces.
 - To print and cut with Silhouette Studio, place the PNG on an A4 page and the
   DXF over it, lined up by its frame. Ungroup the DXF and delete the frame. The
   net keeps clear of the corners where the registration marks go.
@@ -50,6 +51,7 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
 npm install
 npm run dev      # start the dev server
 npm run build    # production build in dist/
+npm test         # check the nets of all solids
 ```
 
 ## How it works

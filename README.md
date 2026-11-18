@@ -24,12 +24,15 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
   own painting.
-- Export net opens a menu to choose original glue tabs or interlocking tabs
+- Export net opens a menu to choose original glue tabs or rectangular tabs
   that assemble without glue, and whether to include the cutter file. The
   painted solid downloads on an A4 page as a PNG to print at 100% scale. Cut
-  along solid lines and fold along dashed ones. For interlocking joints, cut
-  both slits along the base of the wide tab, fold it inward, and flex the two tongues on the
-  matching edge through the slits; their wider shoulders retain the joint.
+  along solid lines and fold along dashed ones. For rectangular tabs, each
+  matching edge pair has one tab shaped like a glue tab and one small
+  rectangular tab. Cut the slit at the base of the wide tab, fold both tabs
+  inward, and tuck the rectangular tab through the slit. The PNG also shows
+  short cuts into the tab at both slit ends; the cutter file keeps each slit
+  straight.
   Paper thickness affects the fit, so try a joint before assembling the solid.
   Transparent areas are left blank. The optional DXF contains
   the lines to cut for a cutting machine: the outline, holes where the paint

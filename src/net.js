@@ -164,27 +164,30 @@ function tab([px, py], [qx, qy], [startAngle, endAngle]) {
   ];
 }
 
-// Matching connectors use fractions of the same edge length on both faces.
-// The tongues have shoulders wider than the slits: flex them through the
-// slit, then let them flatten to retain the joint. All outlines are convex.
-function interlock([p, q], [r, s]) {
+// A glue-shaped receiver tab keeps the slit on the face edge. One small
+// rectangular tab tucks through it; only the bridges beside the slit fold.
+function interlock([p, q], [r, s], angles = TAB_ANGLES[0]) {
   const point = ([a, b], u, v) => [
     a[0] + u * (b[0] - a[0]) + v * (b[1] - a[1]),
     a[1] + u * (b[1] - a[1]) - v * (b[0] - a[0]),
   ];
-  const receiver = [[0, 0], [0.18, 0.15], [0.82, 0.15], [1, 0]]
+  const outline = [[0.38, 0], [0.38, 0.12], [0.62, 0.12], [0.62, 0]]
+    .map(([u, v]) => point([r, s], u, v));
+  const receiver = tab(p, q, angles);
+  const [dx, dy] = [q[0] - p[0], q[1] - p[1]];
+  const height = (dy * (receiver[1][0] - p[0]) - dx * (receiver[1][1] - p[1])) / (dx * dx + dy * dy);
+  // The PNG adds short perpendicular ends entirely in the receiver tab.
+  // Keep them shorter where the tab is shallow; the cutter slit stays straight.
+  const endLength = Math.min(0.03, height / 4);
+  const slit = [[0.37, endLength], [0.37, 0], [0.63, 0], [0.63, endLength]]
     .map(([u, v]) => point([p, q], u, v));
-  const centers = [0.35, 0.65];
-  // The openings lie on the face edge, at the receiver's hinge, so the
-  // matching face can meet it directly. Fold only the remaining bridges.
-  const slits = centers.map((u) => [point([p, q], u - 0.075, 0), point([p, q], u + 0.075, 0)]);
-  const receiverFolds = [[p, slits[0][0]], [slits[0][1], slits[1][0]], [slits[1][1], q]];
-  const tongues = centers.map((u) => [[u - 0.06, 0], [u - 0.09, 0.09],
-    [u - 0.05, 0.15], [u + 0.05, 0.15], [u + 0.09, 0.09], [u + 0.06, 0]]
-    .map(([x, y]) => point([r, s], x, y)));
-  const bare = [[r, tongues[0][0]], [tongues[0].at(-1), tongues[1][0]], [tongues[1].at(-1), s]];
-  return { outlines: [receiver, ...tongues], slits, bare,
-    folds: [...receiverFolds, ...tongues.map((outline) => [outline[0], outline.at(-1)])] };
+  return {
+    outlines: [receiver, outline],
+    slits: [[slit[1], slit[2]]],
+    printSlits: [slit],
+    bare: [[r, outline[0]], [outline.at(-1), s]],
+    folds: [[p, slit[1]], [slit[2], q], [outline[0], outline.at(-1)]],
+  };
 }
 
 // A pseudo-random number generator, seeded so that a solid unfolds the same
@@ -245,9 +248,8 @@ function growPieces({ vertices, faces, faceFrames }, random, assembly) {
           continue;
         }
         if (assembly === 'interlocking') {
-          // Reserve a receiver-sized envelope on every exposed edge. Either
-          // half of a connector fits inside it, so later tab choices cannot
-          // consume space needed by another seam.
+          // The largest receiver also covers the rectangular tab. Reserve
+          // room for either tab on every exposed edge for later seam choices.
           const envelopes = (h, shape, joining) => [shape, ...shape.flatMap((p, k) => {
             const a = faces[h][k];
             const b = faces[h][(k + 1) % faces[h].length];
@@ -344,6 +346,7 @@ function finishNet({ faces }, { placements, polygons, folds: foldEdges }, assemb
   const folds = [];
   const cuts = [];
   const slits = [];
+  const printSlits = [];
   const tabs = [];
   const taken = polygons.map((polygon) => ({ polygon, box: bounds(polygon) }));
   const clear = (outline) => {
@@ -365,9 +368,13 @@ function finishNet({ faces }, { placements, polygons, folds: foldEdges }, assemb
       const g = faceAlong.get(`${b}-${a}`);
       const sides = [segment(f, i), segment(g, faces[g].indexOf(b))];
       if (assembly === 'interlocking') {
-        const connector = [interlock(...sides), interlock(...sides.toReversed())]
-          .find(({ outlines }) => outlines.every(clear) &&
-            outlines.every((outline, i) => outlines.slice(i + 1).every((other) => !overlaps(outline, other))));
+        let connector = null;
+        for (const angles of TAB_ANGLES) {
+          connector = [interlock(...sides, angles), interlock(...sides.toReversed(), angles)]
+            .find(({ outlines }) => outlines.every(clear) &&
+              outlines.every((outline, i) => outlines.slice(i + 1).every((other) => !overlaps(outline, other))));
+          if (connector) break;
+        }
         if (!connector) {
           complete = false;
           return;
@@ -375,6 +382,7 @@ function finishNet({ faces }, { placements, polygons, folds: foldEdges }, assemb
         tabs.push(...connector.outlines);
         cuts.push(...connector.bare);
         slits.push(...connector.slits);
+        printSlits.push(...connector.printSlits);
         folds.push(...connector.folds);
         taken.push(...connector.outlines.map((polygon) => ({ polygon, box: bounds(polygon) })));
         return;
@@ -397,7 +405,7 @@ function finishNet({ faces }, { placements, polygons, folds: foldEdges }, assemb
   });
   for (const outline of tabs) cuts.push(outline);
 
-  return complete ? { placements, faces: polygons, folds, cuts, slits, tabs } : null;
+  return complete ? { placements, faces: polygons, folds, cuts, slits, printSlits, tabs } : null;
 }
 
 // Unfolds a polyhedron into nets in a few ways, in as few pieces as it can.
@@ -459,7 +467,7 @@ function findPlace(polygons, scale) {
 }
 
 // Places a net on the page, in mm, turned and scaled to be as large as fits.
-function placeOnPage({ placements, faces, folds, cuts, slits, tabs }) {
+function placeOnPage({ placements, faces, folds, cuts, slits, printSlits, tabs }) {
   const polygons = [...faces, ...tabs];
   // Tries the net with each edge of its faces along each side of the page.
   const angles = new Map();
@@ -504,6 +512,7 @@ function placeOnPage({ placements, faces, folds, cuts, slits, tabs }) {
     folds: folds.map(move),
     cuts: cuts.map(move),
     slits: slits.map(move),
+    printSlits: printSlits.map(move),
     tabs: tabs.map(move),
     scale: best.scale,
   };
@@ -604,7 +613,7 @@ function drawFaces(context, { placements, faces, scale }, layout, atlas) {
 // Draws a net placed on the page, painting each face from `atlas`, a canvas
 // holding the painter's texture with its bottom row first.
 export function drawNet(net, layout, atlas) {
-  const { folds, cuts, tabs, slits = [] } = net;
+  const { folds, cuts, tabs, slits = [], printSlits = slits } = net;
   const [canvas, context] = pageCanvas();
   context.fillStyle = '#fff';
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -621,7 +630,7 @@ export function drawNet(net, layout, atlas) {
   context.lineWidth = LINE_WIDTH * PIXELS_PER_MM;
   context.lineJoin = 'round';
   context.lineCap = 'round';
-  for (const line of [...cuts, ...slits]) {
+  for (const line of [...cuts, ...printSlits]) {
     context.beginPath();
     trace(context, line);
     context.stroke();

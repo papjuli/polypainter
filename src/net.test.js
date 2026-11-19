@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { netOnPage, PAGE_WIDTH, PAGE_HEIGHT } from './net.js';
-import { POLYHEDRA } from './polyhedra.js';
+import { readFileSync } from 'node:fs';
+import { PAGE_WIDTH, PAGE_HEIGHT } from './net.js';
+import { POLYHEDRA, toFaceCoordinates } from './polyhedra.js';
 import { cutFile } from './cutfile.js';
 
+// The nets tools/build_nets.py laid out for a solid.
+const loadNets = (id) => JSON.parse(readFileSync(new URL(`./nets/${id}.json`, import.meta.url), 'utf8'));
 const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6);
 const edgeCoordinates = ([a, b], p) => {
@@ -22,27 +25,65 @@ function overlaps(a, b) {
     return Math.min(Math.max(...x), Math.max(...y)) - Math.max(Math.min(...x), Math.min(...y)) > 1e-7;
   }));
 }
+const corners = [[0, 0], [0, PAGE_HEIGHT - 41], [PAGE_WIDTH - 41, PAGE_HEIGHT - 41]]
+  .map(([x,y]) => [[x,y],[x+41,y],[x+41,y+41],[x,y+41]]);
 
 for (const [id, solid] of POLYHEDRA) {
-  const net = netOnPage(solid, { assembly: 'interlocking' });
+  const nets = loadNets(id);
+  assert.deepEqual(Object.keys(nets).sort(), ['glue', 'interlocking'], id);
+  for (const [assembly, net] of Object.entries(nets)) {
+    const name = `${id} ${assembly}`;
+    assert.ok(net.scale > 0, name);
+    // The nets match the faces as src/polyhedra.js builds them now: each
+    // face's placement takes its corners onto the face in the net, turning
+    // and scaling them by the net's scale. Run tools/build_nets.py if not.
+    assert.equal(net.faces.length, solid.faces.length, name);
+    assert.equal(net.placements.length, solid.faces.length, name);
+    net.faces.forEach((polygon, f) => {
+      const { xx, xy, yx, yy, x, y } = net.placements[f];
+      near(xx, yy);
+      near(xy, -yx);
+      near(Math.hypot(xx, yx), net.scale);
+      const faceCorners = solid.faces[f].map((i) => toFaceCoordinates(solid.faceFrames[f], solid.vertices[i]));
+      assert.equal(polygon.length, faceCorners.length, name);
+      faceCorners.forEach(([u, v], k) => {
+        assert.ok(distance(polygon[k], [xx * u + xy * v + x, yx * u + yy * v + y]) < 1e-6, name);
+      });
+    });
+    // On the page within its margins, clear of the registration marks'
+    // corners, and with no faces or tabs overlapping.
+    const shapes = [...net.faces, ...net.tabs];
+    for (const shape of shapes) for (const [x, y] of shape) {
+      assert.ok(Number.isFinite(x) && Number.isFinite(y), name);
+      assert.ok(x >= 16 && x <= PAGE_WIDTH - 16 && y >= 16 && y <= PAGE_HEIGHT - 16, name);
+    }
+    shapes.forEach((shape, i) => {
+      for (const other of [...shapes.slice(i + 1), ...corners]) assert.ok(!overlaps(shape, other), name);
+    });
+    // No edge longer than MAX_EDGE in tools/unfold.py.
+    for (const polygon of net.faces) {
+      polygon.forEach((p, k) => assert.ok(distance(p, polygon[(k + 1) % polygon.length]) <= 50 + 1e-6, name));
+    }
+  }
+
+  // A glue net folds between the faces it joins and along the base of each
+  // tab, and cuts both sides of each other edge, one of them the tab's
+  // outline where it has one.
+  const glue = nets.glue;
+  assert.equal(glue.slits.length, 0, id);
+  assert.equal(glue.printSlits.length, 0, id);
+  assert.equal(glue.cuts.length / 2 + glue.folds.length - glue.tabs.length, solid.edges.length, id);
+  for (const outline of glue.tabs) {
+    assert.ok(glue.folds.some(([p, q]) => distance(outline[0], p) < 1e-6 && distance(outline.at(-1), q) < 1e-6), id);
+  }
+
+  const net = nets.interlocking;
   const seams = net.tabs.length / 2;
-  assert.equal(net.faces.length, solid.faces.length, id);
   assert.ok(Number.isInteger(seams) && seams > 0, id);
   assert.equal(net.slits.length, seams, id);
   assert.equal(net.printSlits.length, seams, id);
   assert.equal(net.cuts.length, seams * 4, id);
   assert.equal(net.folds.length - seams * 3, solid.edges.length - seams, id);
-  assert.ok(net.scale > 0, id);
-  const shapes = [...net.faces, ...net.tabs];
-  for (const shape of shapes) for (const [x, y] of shape) {
-    assert.ok(Number.isFinite(x) && Number.isFinite(y), id);
-    assert.ok(x >= 16 && x <= PAGE_WIDTH - 16 && y >= 16 && y <= PAGE_HEIGHT - 16, id);
-  }
-  const corners = [[0, 0], [0, PAGE_HEIGHT - 41], [PAGE_WIDTH - 41, PAGE_HEIGHT - 41]]
-    .map(([x,y]) => [[x,y],[x+41,y],[x+41,y+41],[x,y+41]]);
-  shapes.forEach((shape, i) => {
-    for (const other of [...shapes.slice(i + 1), ...corners]) assert.ok(!overlaps(shape, other), id);
-  });
   const edges = net.faces.flatMap((face, f) => face.map((p, k) => ({
     f, k, side: [p, face[(k + 1) % face.length]],
   })));
@@ -118,11 +159,6 @@ for (const [id, solid] of POLYHEDRA) {
     }
   }
 }
-const cube = POLYHEDRA.get('cube');
-assert.deepEqual(netOnPage(cube), netOnPage(cube, { assembly: 'glue' }));
-assert.equal(netOnPage(cube).slits.length, 0);
-assert.equal(netOnPage(cube).printSlits.length, 0);
-assert.throws(() => netOnPage(cube, { assembly: 'unknown' }));
 const dxf = cutFile({
   folds: [], cuts: [[[10,10],[20,10]]],
   slits: [[[1,2],[3,2]]],
@@ -133,4 +169,4 @@ const slitPath = dxf.slice(dxf.indexOf('0\nPOLYLINE\n'), dxf.indexOf('0\nSEQEND\
 assert.equal((slitPath.match(/0\nVERTEX\n/g) ?? []).length, 2);
 assert.ok(slitPath.includes('10\n1\n20\n2\n') && slitPath.includes('10\n3\n20\n2\n'));
 assert.ok(!dxf.includes('20\n2.5000\n'));
-console.log('Passed: all 22 paired-tab nets, clearances, page fit, rectangular tabs with glue-shaped receivers, PNG-only slit ends, fold bridges, glue defaults, and straight DXF slits.');
+console.log(`Passed: the saved glue and interlocking nets of all ${POLYHEDRA.size} solids match their faces, fit the page without overlaps and with edges up to 50 mm, fold and cut every edge, and have well-formed tabs and slits; DXF slits stay straight.`);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { cutFile } from './cutfile.js';
-import { PIXELS_PER_MM, drawNet, findHoles, netOnPage } from './net.js';
+import { PIXELS_PER_MM, drawNet, findHoles } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
 import { setPixelsPerMeter } from './png.js';
 import { POLYHEDRA, faceAt } from './polyhedra.js';
@@ -330,6 +330,17 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
 }
 
+// The nets, laid out ahead of time by tools/build_nets.py, one file per solid,
+// each loaded when its solid is first exported.
+const netFiles = import.meta.glob('./nets/*.json', { import: 'default' });
+
+async function loadNet(id, assembly) {
+  const load = netFiles[`./nets/${id}.json`];
+  const net = load && (await load())[assembly];
+  if (!net) throw new Error(`There is no ${assembly} net for the ${id}.`);
+  return net;
+}
+
 let exporting = false;
 exportButton.addEventListener('click', () => {
   exportStatus.textContent = '';
@@ -358,10 +369,10 @@ exportForm.addEventListener('submit', async (event) => {
   exportStatus.textContent = 'Preparing your net…';
   let pngSaved = false;
   try {
+    const net = await loadNet(polyhedron.id, assembly);
     // Wait for the next frame to be painted, so the status and the disabled
-    // controls show before the work below blocks the page.
+    // controls show before the drawing below blocks the page.
     await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-    const net = netOnPage(polyhedron, { assembly });
     const atlas = painter.toCanvas();
     const name = 'polypainter-' + polyhedron.id + '-net' + (assembly === 'interlocking' ? '-interlocking' : '');
     const blob = await new Promise((resolve) => drawNet(net, layout, atlas).toBlob(resolve));

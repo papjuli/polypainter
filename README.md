@@ -54,6 +54,21 @@ npm run build    # production build in dist/
 npm test         # check the nets of all solids
 ```
 
+The nets are laid out ahead of time in Python and saved in `src/nets/`, so
+the app only draws them. After changing the solids or the layout, lay them
+out again with Python 3.9 or later. It needs only the standard library, and
+Node, which it runs to read the solids:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python tools/build_nets.py        # all solids, in under a minute
+.venv/bin/python tools/build_nets.py cube   # or only the ones named
+```
+
+It also draws the nets, unpainted, to look at or print: each one as an SVG
+image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
+`--draw-only` draws the saved nets again without laying them out.
+
 ## How it works
 
 - `src/groups.js` builds the octahedral and icosahedral symmetry groups as
@@ -71,11 +86,16 @@ npm test         # check the nets of all solids
   element of the chosen group. Strokes are stored, so the texture can be redrawn
   for undo and when switching solids. The texture keeps its alpha premultiplied,
   so the edges of transparent paint blend as cleanly as those of colors.
-- `src/net.js` unfolds a solid by growing the net across the edges of its
-  faces, leaving out faces that would overlap it or leave no room for a tab,
-  which start further pieces. It tries a few orders and keeps the net that
-  comes out largest on the page, with tabs as tall as fit. It turns and scales
-  the net to fill the page, and draws each face from the texture atlas.
+- `tools/unfold.py` unfolds a solid by growing the net across the edges of
+  its faces, leaving out faces that would overlap it or leave no room for a
+  tab, which start further pieces. It tries a few orders and keeps the net
+  that comes out largest on the page, with tabs as tall as fit, turned and
+  scaled to fill the page, but with edges no longer than 50 mm. `tools/build_nets.py` runs it for every solid and
+  assembly method, with the faces read from `src/polyhedra.js` by
+  `tools/solids.mjs`, saves each solid's nets in `src/nets/`, and draws them
+  with `tools/draw_nets.py`.
+- `src/net.js` draws a saved net, painting each face from the texture atlas.
+  The app loads a solid's nets when it is first exported.
 - `src/cutfile.js` writes a net's cut and fold lines as a DXF file, and
   `src/png.js` sets the PNG's pixel size so it prints at the size of the page.
   The holes are traced from the net drawn on the page, by marching squares in

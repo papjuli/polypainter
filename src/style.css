@@ -242,6 +242,7 @@ input[type='range'] {
 
 .actions button,
 #export-net,
+#export-model,
 #reset-view {
   background: var(--control);
   border-color: var(--border);
@@ -277,6 +278,16 @@ input[type='range'] {
 
 #reset-view {
   background: var(--panel);
+}
+
+/* Shown even on phones, where the other notes are hidden, since it reports
+   a failed export. */
+#model-status {
+  display: block;
+}
+
+#model-status:empty {
+  display: none;
 }
 
 @media (max-width: 900px) {

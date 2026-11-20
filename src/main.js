@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { cutFile } from './cutfile.js';
+import { modelFile } from './model.js';
 import { PIXELS_PER_MM, drawNet, findHoles } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
 import { setPixelsPerMeter } from './png.js';
@@ -38,6 +39,8 @@ const exportButton = document.getElementById('export-net');
 const exportDialog = document.getElementById('export-dialog');
 const exportForm = document.getElementById('export-form');
 const exportStatus = document.getElementById('export-status');
+const exportModelButton = document.getElementById('export-model');
+const modelStatus = document.getElementById('model-status');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -330,6 +333,10 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
 }
 
+// Waits for the next frame to be painted, so that a status message and
+// disabled controls show before work that blocks the page.
+const afterNextPaint = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
 // The nets, laid out ahead of time by tools/build_nets.py, one file per solid,
 // each loaded when its solid is first exported.
 const netFiles = import.meta.glob('./nets/*.json', { import: 'default' });
@@ -370,9 +377,7 @@ exportForm.addEventListener('submit', async (event) => {
   let pngSaved = false;
   try {
     const net = await loadNet(polyhedron.id, assembly);
-    // Wait for the next frame to be painted, so the status and the disabled
-    // controls show before the drawing below blocks the page.
-    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    await afterNextPaint();
     const atlas = painter.toCanvas();
     const name = 'polypainter-' + polyhedron.id + '-net' + (assembly === 'interlocking' ? '-interlocking' : '');
     const blob = await new Promise((resolve) => drawNet(net, layout, atlas).toBlob(resolve));
@@ -394,6 +399,31 @@ exportForm.addEventListener('submit', async (event) => {
   } finally {
     exporting = false;
     inputs.forEach((input) => { input.disabled = false; });
+  }
+});
+
+exportModelButton.addEventListener('click', async () => {
+  exportModelButton.disabled = true;
+  modelStatus.textContent = '';
+  try {
+    await afterNextPaint();
+    // Read together, before anything else can run, so the texture matches
+    // the solid even if the user switches solids during the export.
+    const { polyhedron, layout } = current.painting;
+    const atlas = painter.toCanvas();
+    const hasHoles = painter.hasTransparentPaint;
+    const png = await new Promise((resolve) => atlas.toBlob(resolve));
+    if (!png) throw new Error('Could not create the texture image.');
+    const glb = modelFile(polyhedron, layout, new Uint8Array(await png.arrayBuffer()), {
+      roughness: faceMaterial.roughness,
+      metalness: faceMaterial.metalness,
+      alphaCutoff: hasHoles ? faceMaterial.alphaTest : null,
+    });
+    download(new Blob([glb], { type: 'model/gltf-binary' }), `polypainter-${polyhedron.id}.glb`);
+  } catch (error) {
+    modelStatus.textContent = 'Export failed: ' + error.message;
+  } finally {
+    exportModelButton.disabled = false;
   }
 });
 

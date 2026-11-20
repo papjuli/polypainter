@@ -44,6 +44,26 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
 - To print and cut with Silhouette Studio, place the PNG on an A4 page and the
   DXF over it, lined up by its frame. Ungroup the DXF and delete the frame. The
   net keeps clear of the corners where the registration marks go.
+- Export 3D model downloads the painted solid as a glTF file (.glb), with the
+  paint as its texture, for Blender and other 3D apps. In Blender, open it
+  with File → Import → glTF 2.0 and switch the viewport to Material Preview
+  (Z) to see the paint, which the default Solid view leaves out. The solid's
+  corners lie 1 m from its center, and holes from transparent paint stay
+  see-through. Each face comes in as a separate piece, since it has its own
+  part of the texture. To join them, select everything in Edit Mode and use
+  Mesh → Clean Up → Merge by Distance, then Limited Dissolve to turn the
+  triangles back into the solid's faces.
+- To light up an exported solid as a lamp shade, run the script in `tools/`
+  with Blender:
+
+  ```sh
+  blender --python tools/lamp_shade.py -- polypainter-cube.glb
+  ```
+
+  It hangs the solid from the ceiling of a dark room with a bulb inside, so
+  light shines out through the holes cut by transparent paint and throws
+  them onto the walls. Blender opens looking through the camera at the room
+  as it renders; press F12 for a finished image.
 
 ## Development
 
@@ -51,7 +71,7 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
 npm install
 npm run dev      # start the dev server
 npm run build    # production build in dist/
-npm test         # check the nets of all solids
+npm test         # check the nets and 3D models of all solids
 ```
 
 The nets are laid out ahead of time in Python and saved in `src/nets/`, so
@@ -100,6 +120,10 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   `src/png.js` sets the PNG's pixel size so it prints at the size of the page.
   The holes are traced from the net drawn on the page, by marching squares in
   `src/contours.js`.
+- `src/model.js` writes the painted solid as a binary glTF file: the corners
+  of each face with their places in the texture atlas, split into
+  triangles, and the atlas as a PNG image, clipped where the paint is
+  transparent.
 - `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
   its neighbor's where the fill reaches an edge. A fill is stored as the runs
   of pixels it covers.

@@ -207,6 +207,14 @@ export class Painter {
     return (this.painting.history.at(-1)?.type ?? 'clear') !== 'clear';
   }
 
+  // Whether transparent paint has gone on since the last clear, so the
+  // surface may have holes in it.
+  get hasTransparentPaint() {
+    const { history } = this.painting;
+    const sinceClear = history.slice(history.findLastIndex((action) => action.type === 'clear') + 1);
+    return this.stroke?.color === null || sinceClear.some((action) => action.color === null);
+  }
+
   // Switches to another painting, with a texture of its own.
   load(painting) {
     this.target?.dispose();

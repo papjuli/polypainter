@@ -20,6 +20,7 @@ const FILL_CURSOR_RADIUS = 0.02;
 const INSIDE_BRIGHTNESS = 0.6;
 
 const viewport = document.getElementById('viewport');
+const tools = document.querySelector('.tools');
 const picker = document.getElementById('solid-picker');
 const stats = document.getElementById('solid-stats');
 const hint = document.getElementById('hint');
@@ -244,22 +245,33 @@ symmetrySelect.addEventListener('change', () => {
   describeSymmetry();
 });
 
+const PAINT_HINT = 'Drag on the solid to paint · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom';
+const HINTS = {
+  paint: PAINT_HINT,
+  erase: PAINT_HINT,
+  fill: 'Click on the solid to fill an area · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom',
+  pick: 'Click on the solid to pick up a color · Drag around it or right-drag to rotate · Scroll to zoom',
+  rotate: 'Drag to rotate · Scroll or pinch to zoom',
+};
+
 let tool = 'paint';
+// The tool to go back to once a color has been picked.
+let toolBeforePick = 'paint';
 
 function setTool(name) {
+  if (name !== 'pick') toolBeforePick = name;
   tool = name;
   for (const button of toolPicker.children) {
     button.setAttribute('aria-pressed', String(button.dataset.tool === name));
   }
   viewport.classList.toggle('painting', name !== 'rotate');
-  hint.textContent =
-    name === 'rotate'
-      ? 'Drag to rotate · Scroll or pinch to zoom'
-      : name === 'fill'
-        ? 'Click on the solid to fill an area · Drag around it or right-drag to rotate · Scroll to zoom'
-        : 'Drag on the solid to paint · Drag around it or right-drag to rotate · Scroll to zoom';
+  hint.textContent = HINTS[name];
   hideCursor();
 }
+
+// Whether a click picks up a color: with the Pick tool, or with Alt held
+// down with the other tools. The Rotate tool never gets as far as asking.
+const picksColor = (event) => tool === 'pick' || event.altKey;
 
 for (const button of toolPicker.children) {
   button.addEventListener('click', () => setTool(button.dataset.tool));
@@ -282,12 +294,29 @@ for (const hex of PALETTE) {
   swatch.type = 'button';
   swatch.className = 'swatch';
   swatch.style.background = hex;
+  swatch.dataset.color = hex;
   swatch.setAttribute('aria-label', `Color ${hex}`);
   swatch.addEventListener('click', () => setColor(new THREE.Color(hex), swatch));
   swatches.insertBefore(swatch, transparentSwatch);
 }
 transparentSwatch.addEventListener('click', () => setColor(null, transparentSwatch));
 customColor.addEventListener('input', () => setColor(new THREE.Color(customColor.value), customColor));
+
+// Takes up the color painted at a point on the solid. A palette color selects
+// its own swatch; any other color goes into the custom color.
+function pickColor(point) {
+  const hex = painter.colorAt(point);
+  const swatch =
+    hex === null
+      ? transparentSwatch
+      : ([...swatches.children].find((element) => element.dataset.color === hex) ?? customColor);
+  if (swatch === customColor) customColor.value = hex;
+  setColor(hex === null ? null : new THREE.Color(hex), swatch);
+  // Like an eyedropper, the Pick tool is used once and hands back to the
+  // brush. An Alt+click leaves the tool as it was, except that picking a
+  // color ends erasing.
+  if (tool === 'pick') setTool(toolBeforePick === 'fill' ? 'fill' : 'paint');
+}
 
 const brushRadius = () => Number(brushSize.value) * BRUSH_RADIUS_STEP;
 
@@ -466,6 +495,10 @@ viewport.addEventListener(
     if (!point) return;
 
     event.stopPropagation();
+    if (picksColor(event)) {
+      pickColor(point);
+      return;
+    }
     if (tool === 'fill') {
       runCommand(() => painter.bucketFill(point, { group: current.painting.group, color: brushColor }));
       showCursor(point);
@@ -491,7 +524,9 @@ viewport.addEventListener('pointermove', (event) => {
     if (point) painter.extendStroke(point);
     else painter.liftStroke();
   }
-  if (point) showCursor(point);
+  // Picking reads a single point, so the brush rings would mislead. Holding
+  // Alt in the middle of a stroke doesn't pick, so the rings stay.
+  if (point && (event.pointerId === strokePointer || !picksColor(event))) showCursor(point);
   else hideCursor();
 });
 
@@ -508,13 +543,26 @@ viewport.addEventListener('pointerleave', () => {
   if (strokePointer === null) hideCursor();
 });
 
+// How much of the view's left side the tools panel covers. On phones the
+// panel sits below the view instead, and covers none of it.
+function coveredOnLeft() {
+  const panel = tools.getBoundingClientRect();
+  const view = viewport.getBoundingClientRect();
+  const overlaps = panel.top < view.bottom && panel.bottom > view.top && panel.left < view.right;
+  return overlaps ? Math.max(0, panel.right - view.left) : 0;
+}
+
 function resize() {
   const { clientWidth: width, clientHeight: height } = viewport;
   renderer.setSize(width, height);
-  camera.aspect = width / height;
+  // The solid is fitted and centered in the part of the view right of the
+  // panel. The canvas still fills the window, so strokes can reach the
+  // panel's edge, but it shows only the right of a wider view centered on
+  // the camera's axis.
+  const covered = coveredOnLeft();
   const halfFit = Math.tan(THREE.MathUtils.degToRad(FIT_FOV / 2));
-  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfFit / Math.min(camera.aspect, 1)));
-  camera.updateProjectionMatrix();
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfFit / Math.min((width - covered) / height, 1)));
+  camera.setViewOffset(width + covered, height, 0, 0, width, height);
 }
 new ResizeObserver(resize).observe(viewport);
 resize();

@@ -345,6 +345,28 @@ export class Painter {
     return pixels;
   }
 
+  // The color painted at a point on the surface, read from the texture rather
+  // than the rendered scene, so lighting and shading don't change it. Returns
+  // an sRGB hex string such as '#b23a2e', or null where the paint is
+  // transparent enough to show as a hole.
+  colorAt(point) {
+    this.flush();
+    const { polyhedron, layout } = this.painting;
+    const face = faceAt(polyhedron, point);
+    const [x, y] = toFaceCoordinates(polyhedron.faceFrames[face], point);
+    const { originX, originY } = layout.cells[face];
+    const column = THREE.MathUtils.clamp(Math.floor(originX + x * layout.density), 0, layout.width - 1);
+    const row = THREE.MathUtils.clamp(Math.floor(originY + y * layout.density), 0, layout.height - 1);
+    const pixel = new Uint8Array(4);
+    this.renderer.readRenderTargetPixels(this.target, column, row, 1, 1, pixel);
+    // The same cutoff as the material's alpha test, which decides what shows
+    // as a hole.
+    if (pixel[3] < 128) return null;
+    // The alpha is premultiplied in linear color, as in toCanvas().
+    const color = new THREE.Color().setRGB(pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, THREE.SRGBColorSpace);
+    return '#' + color.multiplyScalar(255 / pixel[3]).getHexString();
+  }
+
   // Copies the texture into a 2D canvas, bottom row first like the texture.
   toCanvas() {
     const { width, height } = this.painting.layout;

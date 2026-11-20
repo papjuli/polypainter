@@ -20,6 +20,11 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   along with its symmetric copies. Fills spread across edges like strokes.
 - The checkered swatch paints and fills transparently, cutting holes through
   which the inside of the solid shows. Paint over a hole to close it again.
+- With the Pick tool, click on the solid to take up the color painted there,
+  as it was painted rather than as lighting shows it. Clicking a hole picks
+  transparent paint. Then the tool goes back to painting or filling. Alt+click
+  (Option+click on a Mac) picks a color with the Paint, Fill and Erase tools
+  too.
 - Drag around the solid, or right-drag, to rotate it; scroll or pinch to zoom.
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
@@ -105,7 +110,8 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   dab paints where a small ball meets the surface, and is drawn once for every
   element of the chosen group. Strokes are stored, so the texture can be redrawn
   for undo and when switching solids. The texture keeps its alpha premultiplied,
-  so the edges of transparent paint blend as cleanly as those of colors.
+  so the edges of transparent paint blend as cleanly as those of colors. The
+  Pick tool reads its color from the texture, not from the rendered scene.
 - `tools/unfold.py` unfolds a solid by growing the net across the edges of
   its faces, leaving out faces that would overlap it or leave no room for a
   tab, which start further pieces. It tries a few orders and keeps the net

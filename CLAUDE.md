@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-PolyPainter is a browser app (three.js + Vite, plain JavaScript ES modules, no framework) for painting on Platonic, Archimedean and stellated solids, where every stroke is repeated by a chosen symmetry group of the solid. The painted solid exports as a printable A4 net (PNG) and an optional DXF cut file. README.md describes the user-facing behavior and has a per-module "How it works" summary.
+PolyPainter is a browser app (three.js + Vite, plain JavaScript ES modules, no framework) for painting on Platonic, Archimedean, Catalan and stellated solids, where every stroke is repeated by a chosen symmetry group of the solid. The painted solid exports as a printable A4 net (PNG) and an optional DXF cut file. README.md describes the user-facing behavior and has a per-module "How it works" summary.
 
 ## Commands
 
@@ -34,14 +34,14 @@ Pushing to `main` deploys to GitHub Pages via `.github/workflows/deploy.yml`. `v
 ### Face coordinates hold it all together
 
 Everything is built on the faces produced by `src/polyhedra.js`:
-- Every solid is scaled to circumradius 1 and placed in one shared orientation, so all of its symmetries lie in the `OCTAHEDRAL` or `ICOSAHEDRAL` matrix groups from `src/groups.js`. Every solid is also star-shaped around the origin, which is how `faceAt` and `projectToSurface` find the face under a point.
+- Every solid is scaled so its farthest vertex is at distance 1, and placed in one shared orientation, so all of its symmetries lie in the `OCTAHEDRAL` or `ICOSAHEDRAL` matrix groups from `src/groups.js`. Every solid is also star-shaped around the origin, which is how `faceAt` and `projectToSurface` find the face under a point.
 - Face vertex indices run counter-clockwise when seen from outside. Each face has a `faceFrame` (`center`, `normal`, `right`, `up`, with `up` pointing toward the midpoint of the face's first edge). `toFaceCoordinates` gives the 2D coordinates of a point in that frame.
 - Face index `f` means the same face everywhere: `polyhedron.faces[f]`, atlas cell `layout.cells[f]`, a symmetry element's `faceMaps[f]`, and a saved net's `placements[f]` and `faces[f]`.
 - Face coordinates are what the rest of the code maps between. The atlas maps them to texels (`originX/originY + density × (x, y)`). A symmetry element's `faceMaps[f]` gives the image face plus a 2×2 matrix in face coordinates (`src/symmetry.js`). A net placement maps them onto the page in mm.
 
 **Changing `src/polyhedra.js` in any way that alters faces, vertex order or face frames invalidates the saved nets.** Re-run `tools/build_nets.py` and commit the new JSON. `npm test` fails until you do. The same applies after changing `tools/unfold.py`.
 
-To add a solid, add an entry to `DEFINITIONS` in `src/polyhedra.js` (a convex `seed` + `group`, or a stellation `base` + `spike`). Then run `build_nets.py <id>` and commit the new `src/nets/<id>.json`. The app picker, symmetry options and tests all pick it up from `POLYHEDRA`.
+To add a solid, add an entry to `DEFINITIONS` in `src/polyhedra.js` (a convex `seed` + `group`, the `dual` of a solid defined before it, or a stellation `base` + `spike`). Duals start each face's vertex list at a corner chosen by `startAtCorner`, so faces related by a rotation get identical face coordinates and share one atlas cell shape; keep that if you add other solids with irregular faces. Then run `build_nets.py <id>` and commit the new `src/nets/<id>.json`. The app picker, symmetry options and tests all pick it up from `POLYHEDRA`.
 
 ### Painting (`src/painter.js`, `src/main.js`)
 
@@ -64,7 +64,7 @@ src/main.js  lazily imports src/nets/<id>.json (import.meta.glob) on first expor
 
 - Net JSON fields: `scale`, `placements` (`{xx,xy,yx,yy,x,y}` per face), `faces`, `folds`, `cuts`, `slits`, `printSlits`, `tabs`, all in mm with the origin at the page's bottom-left. `net.js` flips y for the canvas.
 - Interlocking nets: `slits` are the straight cuts used in the DXF. `printSlits` add short end marks that appear only on the PNG. Each seam has a pair of `tabs`: a glue-tab-shaped receiver followed by a small rectangular tab.
-- Layout constraints from `unfold.py`: 16 mm page margin, three 41 mm corner squares kept clear for Silhouette registration marks, and edges at most 50 mm (`MAX_EDGE`). Faces that would overlap the net, or leave no room for a tab, start further pieces. As a last resort, every face becomes its own piece.
+- Layout constraints from `unfold.py`: 16 mm page margin, three 41 mm corner squares kept clear for Silhouette registration marks, and edges at most 50 mm (`MAX_EDGE`). Faces that would overlap the net, or leave no room for a tab, start further pieces. For glue nets that includes a face closing a seam in a slot too narrow for a tab (`seams_have_room`), which happens around corners whose face angles add up to nearly 360°. A net with a seam left tabless is rejected. As a last resort, every face becomes its own piece.
 - The PNG downloads before the DXF, so a cut-file failure doesn't lose the PNG.
 
 ### 3D model export (`src/model.js`)

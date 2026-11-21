@@ -73,6 +73,9 @@ for (const [id, solid] of POLYHEDRA) {
   assert.equal(glue.slits.length, 0, id);
   assert.equal(glue.printSlits.length, 0, id);
   assert.equal(glue.cuts.length / 2 + glue.folds.length - glue.tabs.length, solid.edges.length, id);
+  // Every cut edge has a tab on one side: its other side is cut, and the
+  // tab's outline is cut in place of the side it's on.
+  assert.equal(glue.cuts.length, glue.tabs.length * 2, id);
   for (const outline of glue.tabs) {
     assert.ok(glue.folds.some(([p, q]) => distance(outline[0], p) < 1e-6 && distance(outline.at(-1), q) < 1e-6), id);
   }

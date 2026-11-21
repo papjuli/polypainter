@@ -173,6 +173,13 @@ def overlaps(p: Polygon, q: Polygon) -> bool:
     return True
 
 
+def clear_of(outline: Polygon, shapes: list[tuple[Polygon, Box]]) -> bool:
+    """Tests whether a convex polygon overlaps none of the given ones, each
+    given with its bounds."""
+    box = bounds(outline)
+    return not any(boxes_overlap(box, other_box) and overlaps(outline, other) for other, other_box in shapes)
+
+
 def alongside(p: Polygon, q: Polygon) -> bool:
     """Tests whether two polygons touch along a stretch of their edges."""
     for i, (ax, ay) in enumerate(p):
@@ -366,7 +373,29 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
     # Of the faces placed so far.
     placements: dict[int, Transform] = {}
     polygons: dict[int, Polygon] = {}
+    boxes: dict[int, Box] = {}
     folds: set[tuple[int, int]] = set()
+
+    def seams_have_room(piece: list[int], g: int, shape: Polygon, joining: int) -> bool:
+        # Placing a face may close seams with faces already in the piece,
+        # leaving each seam's two edges side by side in a slot. Around a corner
+        # whose faces' angles add up to nearly a full turn, the slot is too
+        # narrow for a glue tab on either side.
+        for k, a, b in edges_of(g):
+            h = face_along[(b, a)]
+            if k == joining or h not in piece:
+                continue
+            m = faces[h].index(b)
+            sides = [
+                (shape[k], shape[(k + 1) % len(shape)]),
+                (polygons[h][m], polygons[h][(m + 1) % len(faces[h])]),
+            ]
+            # The two faces beside the slot are the likeliest to block it.
+            others = [(shape, bounds(shape)), (polygons[h], boxes[h])]
+            others += [(polygons[e], boxes[e]) for e in piece if e != h]
+            if not any(clear_of(tab(p, q, angles), others) for angles in TAB_ANGLES for p, q in sides):
+                return False
+        return True
 
     def envelopes(h: int, shape: Polygon, joining: int) -> list[Polygon]:
         # The largest receiver also covers the rectangular tab, so it stands for
@@ -383,7 +412,7 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
         if root in placements:
             continue
         piece = [root]
-        placements[root], polygons[root] = IDENTITY, corners[root]
+        placements[root], polygons[root], boxes[root] = IDENTITY, corners[root], bounds(corners[root])
         # Visits the faces appended to the piece on the way too.
         k = 0
         while k < len(piece):
@@ -405,6 +434,8 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
                 # it hangs from, would leave no room for a tab between the two.
                 if any(overlaps(polygon, polygons[h]) or (h != f and alongside(polygon, polygons[h])) for h in piece):
                     continue
+                if assembly == 'glue' and not seams_have_room(piece, g, polygon, j):
+                    continue
                 if assembly == 'interlocking':
                     # Reserves room for a tab on every edge that may still be cut.
                     proposed = envelopes(g, polygon, j)
@@ -415,7 +446,7 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
                         for shape in proposed
                     ):
                         continue
-                placements[g], polygons[g] = placement, polygon
+                placements[g], polygons[g], boxes[g] = placement, polygon, bounds(polygon)
                 folds.update(((a, b), (b, a)))
                 piece.append(g)
         pieces.append(piece)
@@ -497,8 +528,8 @@ def pack_pieces(unfolded: Unfolded) -> Unfolded:
 
 def finish_net(solid: Solid, unfolded: Unfolded, assembly: str) -> Net | None:
     """Adds the tabs, and sorts the edges of an unfolded solid into those to fold
-    along and those to cut along. Returns None when an interlocking joint has
-    no room."""
+    along and those to cut along. Returns None when a cut edge has no room for
+    a glue tab or an interlocking joint."""
     faces, polygons = solid.faces, unfolded.polygons
 
     def segment(f: int, i: int) -> Polygon:
@@ -513,8 +544,7 @@ def finish_net(solid: Solid, unfolded: Unfolded, assembly: str) -> Net | None:
     taken = [(polygon, bounds(polygon)) for polygon in polygons]
 
     def clear(outline: Polygon) -> bool:
-        box = bounds(outline)
-        return not any(boxes_overlap(box, other_box) and overlaps(outline, other) for other, other_box in taken)
+        return clear_of(outline, taken)
 
     for f, face in enumerate(faces):
         for i, a in enumerate(face):
@@ -561,8 +591,10 @@ def finish_net(solid: Solid, unfolded: Unfolded, assembly: str) -> Net | None:
                 )
                 if tabbed:
                     break
+            if not tabbed:
+                return None
             for n, side in enumerate(sides):
-                if tabbed and tabbed[0] == n:
+                if tabbed[0] == n:
                     tabs.append(tabbed[1])
                     taken.append((tabbed[1], bounds(tabbed[1])))
                     folds.append(side)
@@ -589,14 +621,14 @@ def unfold(solid: Solid, assembly: str) -> list[Net]:
     finished = [net for net in (finish_net(solid, pack_pieces(unfolded), assembly) for unfolded in nets) if net]
     if finished:
         return finished
-    # Tight nets may leave no room for a complete pair. Separate the faces
-    # rather than silently leaving a seam without a glue-free connector.
+    # Tight nets may leave no room for a tab or a complete pair. Separate the
+    # faces rather than silently leaving a seam without one.
     separate = Unfolded(
         [[f] for f in range(len(solid.faces))], [IDENTITY] * len(solid.faces), list(solid.corners), set()
     )
     fallback = finish_net(solid, pack_pieces(separate), assembly)
     if not fallback:
-        raise RuntimeError(f'Could not make room for every interlocking tab on the {solid.id}.')
+        raise RuntimeError(f'Could not make room for every tab on the {solid.id}.')
     return [fallback]
 
 

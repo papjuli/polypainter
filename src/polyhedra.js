@@ -10,10 +10,11 @@ const XI = Math.cbrt((PHI + Math.sqrt(PHI - 5 / 27)) / 2) + Math.cbrt((PHI - Mat
 const ALPHA = XI - 1 / XI;
 const BETA = XI * PHI + PHI ** 2 + PHI / XI;
 
-// The convex solids are uniform: their vertices are the images of one vertex,
-// `seed`, under their symmetry group. The stellated ones have a pyramid on
-// each face of a Platonic solid, with sides `spike` times its edges long, or
-// sunk into it when `spike` is negative.
+// The Platonic and Archimedean solids are uniform: their vertices are the
+// images of one vertex, `seed`, under their symmetry group. The Catalan solids
+// are the duals of the Archimedean ones, each named by `dual`. The stellated
+// ones have a pyramid on each face of a Platonic solid, with sides `spike`
+// times its edges long, or sunk into it when `spike` is negative.
 const DEFINITIONS = [
   { family: 'Platonic solids', id: 'tetrahedron', name: 'Tetrahedron', group: TETRAHEDRAL, seed: [1, 1, 1] },
   { family: 'Platonic solids', id: 'cube', name: 'Cube', group: OCTAHEDRAL, seed: [1, 1, 1] },
@@ -106,6 +107,74 @@ const DEFINITIONS = [
     name: 'Snub dodecahedron',
     group: ICOSAHEDRAL.filter(isRotation),
     seed: [2, 2 * ALPHA, 2 * BETA],
+  },
+  {
+    family: 'Catalan solids',
+    id: 'triakis-tetrahedron',
+    name: 'Triakis tetrahedron',
+    dual: 'truncated-tetrahedron',
+  },
+  { family: 'Catalan solids', id: 'rhombic-dodecahedron', name: 'Rhombic dodecahedron', dual: 'cuboctahedron' },
+  { family: 'Catalan solids', id: 'triakis-octahedron', name: 'Triakis octahedron', dual: 'truncated-cube' },
+  {
+    family: 'Catalan solids',
+    id: 'tetrakis-hexahedron',
+    name: 'Tetrakis hexahedron',
+    dual: 'truncated-octahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'deltoidal-icositetrahedron',
+    name: 'Deltoidal icositetrahedron',
+    dual: 'rhombicuboctahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'disdyakis-dodecahedron',
+    name: 'Disdyakis dodecahedron',
+    dual: 'truncated-cuboctahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'pentagonal-icositetrahedron',
+    name: 'Pentagonal icositetrahedron',
+    dual: 'snub-cube',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'rhombic-triacontahedron',
+    name: 'Rhombic triacontahedron',
+    dual: 'icosidodecahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'triakis-icosahedron',
+    name: 'Triakis icosahedron',
+    dual: 'truncated-dodecahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'pentakis-dodecahedron',
+    name: 'Pentakis dodecahedron',
+    dual: 'truncated-icosahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'deltoidal-hexecontahedron',
+    name: 'Deltoidal hexecontahedron',
+    dual: 'rhombicosidodecahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'disdyakis-triacontahedron',
+    name: 'Disdyakis triacontahedron',
+    dual: 'truncated-icosidodecahedron',
+  },
+  {
+    family: 'Catalan solids',
+    id: 'pentagonal-hexecontahedron',
+    name: 'Pentagonal hexecontahedron',
+    dual: 'snub-dodecahedron',
   },
   {
     family: 'Stellations',
@@ -208,6 +277,51 @@ function stellate({ vertices, faces }, spike) {
   return { vertices: points, faces: sides };
 }
 
+// Turns a face's vertex list to start at the corner from which the corners'
+// distances from the center and the edges' lengths, read counter-clockwise,
+// come out largest. The first edge sets the face's frame, and the symmetries
+// that keep the solid's orientation keep this choice, so faces they take to
+// each other get the same face coordinates, and fit the same atlas cell.
+function startAtCorner(face, vertices) {
+  const n = face.length;
+  const readings = face.flatMap((a, i) => {
+    const b = face[(i + 1) % n];
+    return [vertices[a].length(), vertices[a].distanceTo(vertices[b])];
+  });
+  // Compares the readings from two corners, ignoring rounding.
+  const compare = (s, t) => {
+    for (let k = 0; k < 2 * n; k++) {
+      const difference = readings[(2 * s + k) % (2 * n)] - readings[(2 * t + k) % (2 * n)];
+      if (Math.abs(difference) > EPSILON) return difference;
+    }
+    return 0;
+  };
+  let start = 0;
+  for (let s = 1; s < n; s++) if (compare(s, start) > 0) start = s;
+  return [...face.slice(start), ...face.slice(0, start)];
+}
+
+// The dual of a convex solid centered at the origin: a vertex for each face,
+// at the pole of its plane, and a face for each vertex, through the poles of
+// the faces around it, which lie in one plane. Face f of the solid becomes
+// vertex f of the dual, and vertex v becomes face v.
+function dualize({ vertices, faces, faceFrames }) {
+  const poles = faceFrames.map(({ normal, offset }) => normal.clone().divideScalar(offset));
+  const sides = vertices.map((vertex, v) => {
+    const around = faces.flatMap((face, f) => (face.includes(v) ? [f] : []));
+    return startAtCorner(orderAroundNormal(around, poles, vertex.clone().normalize()), poles);
+  });
+  return { vertices: poles, faces: sides };
+}
+
+// A solid's vertices and faces, before scaling. Convex solids built from a
+// seed vertex leave their faces to be found.
+function shape(definition, built) {
+  if (definition.base) return stellate(built.get(definition.base), definition.spike);
+  if (definition.dual) return dualize(built.get(definition.dual));
+  return { vertices: orbit(definition.group, definition.seed) };
+}
+
 function findEdges(faces) {
   const edges = new Map();
   for (const face of faces) {
@@ -236,11 +350,10 @@ function faceFrame(face, vertices) {
 
 function buildPolyhedron(definition, built) {
   const { family, id, name } = definition;
-  let { vertices, faces } = definition.base
-    ? stellate(built.get(definition.base), definition.spike)
-    : { vertices: orbit(definition.group, definition.seed) };
+  let { vertices, faces } = shape(definition, built);
   faces ??= findFaces(vertices);
-  // Scale every solid to a circumradius of 1 so they appear at similar sizes.
+  // Scale every solid to have its farthest vertices at a distance of 1, so they
+  // appear at similar sizes.
   const radius = Math.max(...vertices.map((v) => v.length()));
   vertices = vertices.map((v) => v.clone().divideScalar(radius));
   const edges = findEdges(faces);

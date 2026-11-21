@@ -1,7 +1,7 @@
 # PolyPainter
 
-Paint on the Platonic and Archimedean solids and on stellated ones, with
-symmetry, in the spirit of
+Paint on the Platonic, Archimedean and Catalan solids and on stellated ones,
+with symmetry, in the spirit of
 *M.C. Escher Kaleidocycles* by Doris Schattschneider and Wallace Walker: every
 stroke is repeated over the whole surface by a symmetry group of the solid.
 Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
@@ -9,8 +9,9 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
 ## Using it
 
 - Pick a solid from the toolbar: the five Platonic solids, the 13 Archimedean
-  solids, or the stellated octahedron, small stellated dodecahedron, great
-  dodecahedron and great stellated dodecahedron. Then pick a symmetry group.
+  solids, their duals the 13 Catalan solids, or the stellated octahedron,
+  small stellated dodecahedron, great dodecahedron and great stellated
+  dodecahedron. Then pick a symmetry group.
   Each solid offers the polyhedral groups it has, for example on the cube:
   none, T, Td, Th, O and Oh. The default is the solid's rotation group, as in
   Escher's designs.
@@ -44,8 +45,12 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   is transparent, and perforated folds, with a frame the size of the page.
   Where a solid can't be unfolded in one piece with room for every connector,
   the net comes in a few pieces. With glue tabs, this happens only for the
-  great dodecahedron and great stellated dodecahedron. Rectangular tabs need
-  more room, so with them most solids come in several pieces.
+  great dodecahedron, great stellated dodecahedron, triakis icosahedron and
+  disdyakis triacontahedron. Around some of the triakis icosahedron's
+  corners, the faces' angles add up to so nearly a full turn that the last
+  two faces leave no room for a tab between them, so its net comes in ten
+  pieces. Rectangular tabs need more room, so with them most solids come in
+  several pieces.
 - To print and cut with Silhouette Studio, place the PNG on an A4 page and the
   DXF over it, lined up by its frame. Ungroup the DXF and delete the frame. The
   net keeps clear of the corners where the registration marks go.
@@ -53,11 +58,11 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   paint as its texture, for Blender and other 3D apps. In Blender, open it
   with File → Import → glTF 2.0 and switch the viewport to Material Preview
   (Z) to see the paint, which the default Solid view leaves out. The solid's
-  corners lie 1 m from its center, and holes from transparent paint stay
-  see-through. Each face comes in as a separate piece, since it has its own
-  part of the texture. To join them, select everything in Edit Mode and use
-  Mesh → Clean Up → Merge by Distance, then Limited Dissolve to turn the
-  triangles back into the solid's faces.
+  outermost corners lie 1 m from its center, and holes from transparent
+  paint stay see-through. Each face comes in as a separate piece, since it
+  has its own part of the texture. To join them, select everything in Edit
+  Mode and use Mesh → Clean Up → Merge by Distance, then Limited Dissolve to
+  turn the triangles back into the solid's faces.
 - To light up an exported solid as a lamp shade, run the script in `tools/`
   with Blender:
 
@@ -98,9 +103,11 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
 
 - `src/groups.js` builds the octahedral and icosahedral symmetry groups as
   matrices. All solids are placed so that their symmetries are among them.
-- `src/polyhedra.js` builds the solids. The convex ones are the images of one
-  vertex under their symmetry group, with their faces found as the planes
-  that have all the vertices on one side. The stellated ones put a pyramid on
+- `src/polyhedra.js` builds the solids. The Platonic and Archimedean ones are
+  the images of one vertex under their symmetry group, with their faces found
+  as the planes that have all the vertices on one side. The Catalan solids are
+  the Archimedean ones' duals, with a vertex at the pole of each face's plane
+  and a face around each vertex. The stellated ones put a pyramid on
   each face of a Platonic solid, or sink one into it. Each face gets a 2D
   coordinate frame. All the solids are star-shaped around their center, which
   is how a point is put onto the surface.
@@ -114,9 +121,10 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   Pick tool reads its color from the texture, not from the rendered scene.
 - `tools/unfold.py` unfolds a solid by growing the net across the edges of
   its faces, leaving out faces that would overlap it or leave no room for a
-  tab, which start further pieces. It tries a few orders and keeps the net
-  that comes out largest on the page, with tabs as tall as fit, turned and
-  scaled to fill the page, but with edges no longer than 50 mm. `tools/build_nets.py` runs it for every solid and
+  tab, which start further pieces. Every cut edge gets a tab. It tries a few
+  orders and keeps the net that comes out largest on the page, with tabs as
+  tall as fit, turned and scaled to fill the page, but with edges no longer
+  than 50 mm. `tools/build_nets.py` runs it for every solid and
   assembly method, with the faces read from `src/polyhedra.js` by
   `tools/solids.mjs`, saves each solid's nets in `src/nets/`, and draws them
   with `tools/draw_nets.py`.

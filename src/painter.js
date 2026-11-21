@@ -3,7 +3,7 @@ import { floodFill } from './fill.js';
 import { faceAt, projectToSurface, toFaceCoordinates } from './polyhedra.js';
 
 // The paint lives in a texture atlas with one cell per face.
-const TEXELS_PER_UNIT = 640;
+export const TEXELS_PER_UNIT = 640;
 const MAX_ATLAS_SIZE = 4096;
 // Each cell keeps a margin around its face, painted as the face's extension,
 // so texture filtering at the face's edges doesn't pick up unpainted texels.
@@ -42,16 +42,25 @@ export function createAtlasLayout({ vertices, faces, faceFrames }, maxTextureSiz
     }
   });
 
-  const columns = Math.ceil(Math.sqrt(faces.length));
-  const rows = Math.ceil(faces.length / columns);
+  // Try every number of columns and keep the grid that gives the faces the
+  // most texels, so long, thin faces aren't held back by a square grid of
+  // cells as wide as their length. Of the grids that reach TEXELS_PER_UNIT,
+  // keep the one with the smallest texture.
   const maxSize = Math.min(MAX_ATLAS_SIZE, maxTextureSize);
-  const density = Math.min(
-    TEXELS_PER_UNIT,
-    (Math.floor(maxSize / columns) - 2 * CELL_MARGIN - 1) / (maxX - minX),
-    (Math.floor(maxSize / rows) - 2 * CELL_MARGIN - 1) / (maxY - minY),
-  );
-  const cellWidth = Math.ceil((maxX - minX) * density) + 2 * CELL_MARGIN;
-  const cellHeight = Math.ceil((maxY - minY) * density) + 2 * CELL_MARGIN;
+  const grids = faces.map((_, f) => {
+    const columns = f + 1;
+    const rows = Math.ceil(faces.length / columns);
+    const density = Math.min(
+      TEXELS_PER_UNIT,
+      (Math.floor(maxSize / columns) - 2 * CELL_MARGIN - 1) / (maxX - minX),
+      (Math.floor(maxSize / rows) - 2 * CELL_MARGIN - 1) / (maxY - minY),
+    );
+    const cellWidth = Math.ceil((maxX - minX) * density) + 2 * CELL_MARGIN;
+    const cellHeight = Math.ceil((maxY - minY) * density) + 2 * CELL_MARGIN;
+    return { columns, rows, density, cellWidth, cellHeight, size: columns * cellWidth * rows * cellHeight };
+  });
+  const { columns, rows, density, cellWidth, cellHeight } = grids.reduce((best, grid) =>
+    grid.density > best.density || (grid.density === best.density && grid.size < best.size) ? grid : best);
 
   const cells = faces.map((_, f) => {
     const left = (f % columns) * cellWidth;

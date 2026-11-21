@@ -14,7 +14,7 @@ npm run preview    # serve the production build
 npm test           # node src/net.test.js && node src/model.test.js
 ```
 
-`npm test` runs two plain Node scripts using `node:assert`. There is no test runner, linter or formatter. `src/net.test.js` checks that the saved nets in `src/nets/` still match the faces built by `src/polyhedra.js`, fit the page without overlaps, and have well-formed tabs and slits, and that DXF slits stay straight. `src/model.test.js` checks the glTF export of every solid: file framing, triangle winding, and texture coordinates.
+`npm test` runs two plain Node scripts using `node:assert`. There is no test runner, linter or formatter. `src/net.test.js` checks that the saved nets in `src/nets/` still match the faces built by `src/polyhedra.js`, fit the page without overlaps, and have well-formed tabs and slits, and that DXF slits stay straight. `src/model.test.js` checks the glTF export of every solid: file framing, triangle winding, and texture coordinates. It also checks that each texture atlas fits its maximum size, and that solids with long, thin faces still get the full `TEXELS_PER_UNIT`.
 
 Nets are laid out ahead of time in Python (3.9+, standard library only; it also calls `node`). Use the venv:
 

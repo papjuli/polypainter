@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
 import { modelFile } from './model.js';
-import { createAtlasLayout } from './painter.js';
+import { TEXELS_PER_UNIT, createAtlasLayout } from './painter.js';
 import { POLYHEDRA } from './polyhedra.js';
 
 const near = (a, b, message) => assert.ok(Math.abs(a - b) < 1e-5, `${message}: ${a} vs ${b}`);
@@ -50,9 +50,24 @@ function read(model, index, name) {
 }
 
 const at = (array, i, size) => Array.from(array.subarray(i * size, (i + 1) * size));
+const longFaced = [];
 
 for (const [id, solid] of POLYHEDRA) {
   const layout = createAtlasLayout(solid, 4096);
+  // The atlas fits the texture size. Its grid of cells suits the faces'
+  // shape, so faces more than twice as long as they are wide still get the
+  // full paint resolution.
+  for (const size of [2048, 4096]) {
+    const { width, height } = createAtlasLayout(solid, size);
+    assert.ok(width <= size && height <= size, `${id} atlas size`);
+  }
+  const [left, bottom, right, top] = layout.cells[0].rect;
+  const [cellWidth, cellHeight] = [right - left, top - bottom];
+  if (Math.max(cellWidth, cellHeight) > 2 * Math.min(cellWidth, cellHeight)) {
+    assert.equal(layout.density, TEXELS_PER_UNIT, `${id} atlas density`);
+    longFaced.push(id);
+  }
+
   const opaque = parse(modelFile(solid, layout, png, { ...material, alphaCutoff: null }), id);
   const model = parse(modelFile(solid, layout, png, { ...material, alphaCutoff: 0.5 }), id);
 
@@ -120,4 +135,4 @@ for (const [id, solid] of POLYHEDRA) {
   near(area, faceArea, `${id} area`);
 }
 
-console.log(`3D models of ${POLYHEDRA.size} solids OK`);
+console.log(`3D models of ${POLYHEDRA.size} solids OK; ${longFaced.length} with long faces get the full paint resolution: ${longFaced.join(', ')}`);

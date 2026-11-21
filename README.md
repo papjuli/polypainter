@@ -113,7 +113,8 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   is how a point is put onto the surface.
 - `src/symmetry.js` finds each solid's full symmetry group, the matrices that
   take its vertices to its vertices, and the named subgroups it contains.
-- `src/painter.js` keeps the paint in a texture atlas with one cell per face. A
+- `src/painter.js` keeps the paint in a texture atlas with one cell per face,
+  in whichever grid of columns and rows gives the faces the most texels. A
   dab paints where a small ball meets the surface, and is drawn once for every
   element of the chosen group. Strokes are stored, so the texture can be redrawn
   for undo and when switching solids. The texture keeps its alpha premultiplied,

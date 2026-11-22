@@ -555,14 +555,17 @@ function coveredOnLeft() {
 function resize() {
   const { clientWidth: width, clientHeight: height } = viewport;
   renderer.setSize(width, height);
-  // The solid is fitted and centered in the part of the view right of the
-  // panel. The canvas still fills the window, so strokes can reach the
-  // panel's edge, but it shows only the right of a wider view centered on
-  // the camera's axis.
-  const covered = coveredOnLeft();
   const halfFit = Math.tan(THREE.MathUtils.degToRad(FIT_FOV / 2));
-  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfFit / Math.min((width - covered) / height, 1)));
-  camera.setViewOffset(width + covered, height, 0, 0, width, height);
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfFit / Math.min(width / height, 1)));
+  // The solid is fitted to a square across the view's narrower side. The
+  // square moves right, toward the middle of the space beside the panel, but
+  // only as far as it stays in the view. Fitting the solid into that space
+  // instead would shrink it on portrait tablets, where the space is narrow.
+  const shift = Math.min(coveredOnLeft(), width - Math.min(width, height)) / 2;
+  // The canvas still fills the window, so strokes can reach the panel's
+  // edge, but it shows only the right of a wider view centered on the
+  // camera's axis.
+  camera.setViewOffset(width + 2 * shift, height, 0, 0, width, height);
 }
 new ResizeObserver(resize).observe(viewport);
 resize();

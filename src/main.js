@@ -546,10 +546,12 @@ viewport.addEventListener('pointerleave', () => {
 // How much of the view's left side the tools panel covers. On phones the
 // panel sits below the view instead, and covers none of it.
 function coveredOnLeft() {
-  const panel = tools.getBoundingClientRect();
-  const view = viewport.getBoundingClientRect();
-  const overlaps = panel.top < view.bottom && panel.bottom > view.top && panel.left < view.right;
-  return overlaps ? Math.max(0, panel.right - view.left) : 0;
+  // This asks whether the panel floats over the view instead of comparing
+  // their edges. At fractional pixel ratios, such as 2.625 on Pixel phones,
+  // the view's bottom can come out a rounding error below the top of the
+  // panel under it, which looked like the panel covering the whole width.
+  if (getComputedStyle(tools).position !== 'fixed') return 0;
+  return Math.max(0, tools.getBoundingClientRect().right - viewport.getBoundingClientRect().left);
 }
 
 function resize() {

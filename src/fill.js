@@ -4,6 +4,12 @@ import { toFaceCoordinates } from './polyhedra.js';
 // of 255, so the fill also takes in the faint outer rim of strokes.
 const TOLERANCE = 48;
 
+// How far, in pixels, a step across an edge may go from where it lands to the
+// nearest pixel of the face there. Of the four pixel centers around a point
+// inside an edge, at least one is inside the edge too, so a pixel's diagonal
+// reaches a pixel of the face from anywhere along the edge away from corners.
+const STEP_REACH = Math.SQRT2;
+
 // The rotation and translation taking a to A and b to B, where the segments
 // from a to b and from A to B have the same length.
 function rigidMap([ax, ay], [bx, by], [Ax, Ay], [Bx, By]) {
@@ -33,13 +39,9 @@ function faceRegions({ vertices, faces, faceFrames }, layout) {
 
   return outlines.map((outline, f) => {
     const n = outline.length;
-    const ys = outline.map(([, y]) => y);
-    const bottom = Math.ceil(Math.min(...ys) - 0.5);
-    const rows = Math.floor(Math.max(...ys) - 0.5) + 1 - bottom;
-    const starts = new Int32Array(rows);
-    const ends = new Int32Array(rows);
-    for (let k = 0; k < rows; k++) {
-      const y = bottom + k + 0.5;
+    // The pixels in row v whose centers lie in the face, as [start, end).
+    const span = (v) => {
+      const y = v + 0.5;
       let min = Infinity;
       let max = -Infinity;
       outline.forEach(([px, py], i) => {
@@ -49,9 +51,29 @@ function faceRegions({ vertices, faces, faceFrames }, layout) {
         min = Math.min(min, x);
         max = Math.max(max, x);
       });
-      starts[k] = Math.ceil(min - 0.5);
-      // Keeps at least one pixel in a row that only grazes a corner.
-      ends[k] = Math.max(Math.floor(max - 0.5) + 1, starts[k] + 1);
+      return [Math.ceil(min - 0.5), Math.floor(max - 0.5) + 1];
+    };
+    const ys = outline.map(([, y]) => y);
+    let bottom = Math.ceil(Math.min(...ys) - 0.5);
+    let top = Math.floor(Math.max(...ys) - 0.5) + 1;
+    // Leaves out the end rows that only graze a corner, passing it between
+    // pixel centers. A pixel kept there can be cut off from the face's other
+    // pixels, so no fill reaches it, and the margin beyond it, which copies
+    // it, stays unfilled too.
+    const grazes = (v) => {
+      const [start, end] = span(v);
+      return end <= start;
+    };
+    while (top - bottom > 1 && grazes(bottom)) bottom++;
+    while (top - bottom > 1 && grazes(top - 1)) top--;
+    const rows = top - bottom;
+    const starts = new Int32Array(rows);
+    const ends = new Int32Array(rows);
+    for (let k = 0; k < rows; k++) {
+      const [start, end] = span(bottom + k);
+      starts[k] = start;
+      // Keeps at least one pixel in any other row too narrow to hold one.
+      ends[k] = Math.max(end, start + 1);
     }
 
     const edges = faces[f].map((a, i) => {
@@ -85,13 +107,31 @@ function clampInto({ bottom, rows, starts, ends }, u, v) {
 
 // Steps from a pixel just off a face onto the face beyond the edge it is past,
 // returning that face and pixel, or nothing past a corner.
+//
+// The pixel's center lands as far inside the face beyond as it was outside
+// this one, often less than half a pixel. The pixel it lands in can then have
+// its center outside that face, so it isn't one of the face's pixels. Along an
+// edge that runs straight across the atlas, that happens at every pixel, and
+// the fill could never cross it. So the step goes to the face's pixel nearest
+// to where the center lands.
 function stepAcross(regions, f, u, v) {
   const [x, y] = [u + 0.5, v + 0.5];
   const distance = ({ normal, offset }) => normal[0] * x + normal[1] * y - offset;
   const edge = regions[f].edges.reduce((best, edge) => (distance(edge) > distance(best) ? edge : best));
   const [mx, my] = edge.map(x, y);
-  const [mu, mv] = [Math.floor(mx), Math.floor(my)];
-  return inside(regions[edge.face], mu, mv) ? [edge.face, mu, mv] : null;
+  const region = regions[edge.face];
+  let nearest = null;
+  let nearestSq = STEP_REACH * STEP_REACH;
+  for (let mv = Math.ceil(my - 0.5 - STEP_REACH); mv <= my - 0.5 + STEP_REACH; mv++) {
+    for (let mu = Math.ceil(mx - 0.5 - STEP_REACH); mu <= mx - 0.5 + STEP_REACH; mu++) {
+      const distanceSq = (mu + 0.5 - mx) ** 2 + (mv + 0.5 - my) ** 2;
+      if (distanceSq <= nearestSq && inside(region, mu, mv)) {
+        nearest = [edge.face, mu, mv];
+        nearestSq = distanceSq;
+      }
+    }
+  }
+  return nearest;
 }
 
 // Finds what a bucket fill covers: the pixels of `pixels`, the atlas as RGBA

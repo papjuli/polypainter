@@ -80,7 +80,7 @@ Try it here: **https://papjuli.github.io/polypainter/**.
 npm install
 npm run dev      # start the dev server
 npm run build    # production build in dist/
-npm test         # check the nets and 3D models of all solids
+npm test         # check the nets, 3D models and fills of all solids
 ```
 
 The nets are laid out ahead of time in Python and saved in `src/nets/`, so

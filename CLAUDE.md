@@ -11,10 +11,10 @@ npm install
 npm run dev        # Vite dev server
 npm run build      # production build into dist/
 npm run preview    # serve the production build
-npm test           # node src/net.test.js && node src/model.test.js
+npm test           # node src/net.test.js && node src/model.test.js && node src/fill.test.js
 ```
 
-`npm test` runs two plain Node scripts using `node:assert`. There is no test runner, linter or formatter. `src/net.test.js` checks that the saved nets in `src/nets/` still match the faces built by `src/polyhedra.js`, fit the page without overlaps, and have well-formed tabs and slits, and that DXF slits stay straight. `src/model.test.js` checks the glTF export of every solid: file framing, triangle winding, and texture coordinates.
+`npm test` runs three plain Node scripts using `node:assert`. There is no test runner, linter or formatter. `src/net.test.js` checks that the saved nets in `src/nets/` still match the faces built by `src/polyhedra.js`, fit the page without overlaps, and have well-formed tabs and slits, and that DXF slits stay straight. `src/model.test.js` checks the glTF export of every solid: file framing, triangle winding, and texture coordinates. `src/fill.test.js` checks that a bucket fill of every unpainted solid, at the atlas size the app uses, reaches every pixel of every face and cell margin, and that a fill stops at a band painted around the solid; it takes several seconds.
 
 Nets are laid out ahead of time in Python (3.9+, standard library only; it also calls `node`). Use the venv:
 

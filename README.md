@@ -6,12 +6,13 @@ with symmetry, in the spirit of
 stroke is repeated over the whole surface by a symmetry group of the solid.
 Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
 
+Try it here: **https://papjuli.github.io/polypainter/**.
+
 ## Using it
 
 - Pick a solid from the toolbar: the five Platonic solids, the 13 Archimedean
-  solids, their duals the 13 Catalan solids, or the stellated octahedron,
-  small stellated dodecahedron, great dodecahedron and great stellated
-  dodecahedron. Then pick a symmetry group.
+  solids, their duals the 13 Catalan solids, or an available stellated polyhedron.
+  Then pick a symmetry group.
   Each solid offers the polyhedral groups it has, for example on the cube:
   none, T, Td, Th, O and Oh. The default is the solid's rotation group, as in
   Escher's designs.
@@ -29,35 +30,26 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
 - The checkered swatch paints and fills transparently, cutting holes through
   which the inside of the solid shows. Paint over a hole to close it again.
 - With the Pick tool, click on the solid to take up the color painted there,
-  as it was painted rather than as lighting shows it. Clicking a hole picks
-  transparent paint. Then the tool goes back to painting or filling. Alt+click
-  (Option+click on a Mac) picks a color with the Paint, Fill and Erase tools
-  too.
+  as it was painted. Clicking a hole picks transparent paint. Then the tool
+  goes back to painting or filling. Alt+click (Option+click on a Mac) picks a
+  color with the Paint, Fill and Erase tools too.
 - Drag around the solid, or right-drag, to rotate it; scroll or pinch to zoom.
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
   own painting.
-- Export net opens a menu to choose original glue tabs or rectangular tabs
-  that assemble without glue, and whether to include the cutter file. The
+- Export net opens a menu to choose glue tabs or rectangular tabs
+  that assemble without glue. The
   painted solid downloads on an A4 page as a PNG to print at 100% scale. Cut
-  along solid lines and fold along dashed ones. For rectangular tabs, each
-  matching edge pair has one tab shaped like a glue tab and one small
-  rectangular tab. Cut the slit at the base of the wide tab, fold both tabs
-  inward, and tuck the rectangular tab through the slit. The PNG also shows
-  short cuts into the tab at both slit ends; the cutter file keeps each slit
-  straight.
+  along solid lines and fold along dashed ones. For rectangular tabs, cut the
+  slit at the base of the wide tab, fold both tabs
+  inward, and tuck the rectangular tab through the slit.
   Paper thickness affects the fit, so try a joint before assembling the solid.
-  Transparent areas are left blank. The optional DXF contains
+  Transparent areas are left blank. The optional DXF cutter file contains
   the lines to cut for a cutting machine: the outline, holes where the paint
   is transparent, and perforated folds, with a frame the size of the page.
   Where a solid can't be unfolded in one piece with room for every connector,
-  the net comes in a few pieces. With glue tabs, this happens only for the
-  great dodecahedron, great stellated dodecahedron, triakis icosahedron and
-  disdyakis triacontahedron. Around some of the triakis icosahedron's
-  corners, the faces' angles add up to so nearly a full turn that the last
-  two faces leave no room for a tab between them, so its net comes in ten
-  pieces. Rectangular tabs need more room, so with them most solids come in
-  several pieces.
+  the net comes in a few pieces. Rectangular tabs need more room, so with them
+  most solids come in several pieces.
 - To print and cut with Silhouette Studio, place the PNG on an A4 page and the
   DXF over it, lined up by its frame. Ungroup the DXF and delete the frame. The
   net keeps clear of the corners where the registration marks go.
@@ -126,6 +118,9 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   for undo and when switching solids. The texture keeps its alpha premultiplied,
   so the edges of transparent paint blend as cleanly as those of colors. The
   Pick tool reads its color from the texture, not from the rendered scene.
+- `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
+  its neighbor's where the fill reaches an edge. A fill is stored as the runs
+  of pixels it covers.
 - `tools/unfold.py` unfolds a solid by growing the net across the edges of
   its faces, leaving out faces that would overlap it or leave no room for a
   tab, which start further pieces. Every cut edge gets a tab. It tries a few
@@ -145,9 +140,7 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   of each face with their places in the texture atlas, split into
   triangles, and the atlas as a PNG image, clipped where the paint is
   transparent.
-- `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
-  its neighbor's where the fill reaches an edge. A fill is stored as the runs
-  of pixels it covers.
+
 
 ## Deployment
 

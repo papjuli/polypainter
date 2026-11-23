@@ -63,6 +63,12 @@ body {
   font-size: 14px;
 }
 
+.title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 h1 {
   margin: 0;
   font-size: 20px;
@@ -155,6 +161,21 @@ input:focus-visible {
   color: var(--muted);
 }
 
+button.link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.link:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
 select {
   font: inherit;
   color: var(--text);
@@ -243,6 +264,7 @@ input[type='range'] {
 .actions button,
 #export-net,
 #export-model,
+#about,
 #reset-view {
   background: var(--control);
   border-color: var(--border);
@@ -276,6 +298,7 @@ input[type='range'] {
   text-align: center;
 }
 
+#about,
 #reset-view {
   background: var(--panel);
 }
@@ -334,7 +357,8 @@ input[type='range'] {
 
   .field > label,
   .field > .label,
-  .note {
+  .note,
+  .link {
     display: none;
   }
 
@@ -385,4 +409,233 @@ input[type='range'] {
 #export-download {
   background: var(--accent);
   color: white;
+}
+
+/* The dialog has no padding of its own, so that a click on the dialog
+   element itself can only be a click on its backdrop. Only the body scrolls,
+   keeping the title and the close button in view. */
+#about-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: #1e212a;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+#about-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+#about-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.about-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 14px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.about-head button {
+  background: var(--control);
+  border-color: var(--border);
+}
+
+.about-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 24px 24px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* The body takes focus when the dialog opens, so the arrow and page keys
+   scroll it. It is a scroll area, not a control, so it shows no ring. */
+.about-body:focus {
+  outline: none;
+}
+
+.about-body p,
+.about-body dl {
+  margin: 0 0 12px;
+}
+
+.about-body h3 {
+  margin: 28px 0 10px;
+  font-size: 16px;
+  scroll-margin-top: 18px;
+}
+
+.about-body h4 {
+  margin: 22px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.about-body dt {
+  font-weight: 600;
+}
+
+.about-body dd {
+  margin: 2px 0 12px;
+}
+
+.about-body dt span {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.about-body a {
+  color: var(--accent);
+}
+
+/* On phones the text runs closer to the edges, leaving the diagram room. */
+@media (max-width: 600px) {
+  .about-head {
+    padding-left: 16px;
+  }
+
+  .about-body {
+    padding: 16px;
+  }
+}
+
+.about-body .credits {
+  margin: 24px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* The diagram of the symmetry groups in the About dialog. */
+.group-diagram {
+  margin: 4px 0 16px;
+}
+
+.group-diagram svg {
+  display: block;
+  width: 100%;
+  max-width: 460px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.group-diagram text {
+  fill: var(--text);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.group-diagram .axis text {
+  fill: var(--muted);
+  text-anchor: end;
+}
+
+.group-diagram .axis text:first-child {
+  text-anchor: start;
+}
+
+.group-diagram .guide {
+  stroke: rgba(255, 255, 255, 0.06);
+}
+
+.group-diagram .edge {
+  stroke: rgba(255, 255, 255, 0.32);
+  stroke-width: 1.5;
+}
+
+.group-diagram .connector {
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 3;
+}
+
+/* The nodes are opaque, so the lines end at their outlines. The mirror tint
+   is the accent laid over the dialog's background at about a fifth. */
+.group-diagram .node rect {
+  fill: #1e212a;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.group-diagram .node.mirrors rect {
+  fill: #2b3955;
+  stroke: var(--accent);
+}
+
+.group-diagram .node text {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.group-diagram .solid rect {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(255, 255, 255, 0.14);
+}
+
+/* The card's outline shows focus, in place of the usual ring. */
+.group-diagram .solid:focus {
+  outline: none;
+}
+
+.group-diagram .solid:is(:hover, :focus) rect {
+  stroke: var(--accent);
+}
+
+.group-diagram .lattice > * {
+  transition: opacity 0.15s;
+}
+
+.group-diagram:has(.solid.t:is(:hover, :focus)) .lattice > :not(.t),
+.group-diagram:has(.solid.o:is(:hover, :focus)) .lattice > :not(.o),
+.group-diagram:has(.solid.i:is(:hover, :focus)) .lattice > :not(.i) {
+  opacity: 0.15;
+}
+
+.group-diagram figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.group-diagram .key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.group-diagram .key-node {
+  width: 20px;
+  height: 11px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--muted);
+  border-radius: 6px;
+}
+
+.group-diagram .key-node.mirrors {
+  background: #2b3955;
+  border-color: var(--accent);
 }

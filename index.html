@@ -9,7 +9,10 @@
     <div id="viewport"></div>
 
     <header class="toolbar">
-      <h1>PolyPainter</h1>
+      <div class="title">
+        <h1>PolyPainter</h1>
+        <button id="about" type="button" aria-haspopup="dialog" aria-controls="about-dialog">About</button>
+      </div>
       <select id="solid-picker" class="picker" aria-label="Choose a solid"></select>
     </header>
 
@@ -18,6 +21,9 @@
         <label for="symmetry">Symmetry</label>
         <select id="symmetry"></select>
         <p id="symmetry-note" class="note"></p>
+        <button id="about-symmetry-link" class="link" type="button" aria-haspopup="dialog" aria-controls="about-dialog">
+          What are these groups?
+        </button>
       </div>
 
       <div class="field">
@@ -86,6 +92,255 @@
           <button id="export-download" type="submit">Download</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="about-dialog" aria-labelledby="about-title">
+      <div class="about-head">
+        <h2 id="about-title">About PolyPainter</h2>
+        <form method="dialog"><button type="submit">Close</button></form>
+      </div>
+      <div id="about-body" class="about-body" tabindex="-1" autofocus>
+        <p>
+          Welcome to PolyPainter, a web app for painting on polyhedra!
+          Whatever you paint is repeated all over the solid by some of its symmetries,
+          so a single stroke can become a pattern of 12, 60 or even 120 matching strokes.
+          When you're done, you can export the solid as a net to print, cut out and fold
+          into a paper model, or as a 3D model.
+        </p>
+        <p>
+          It was inspired by <cite>M.C. Escher Kaleidocycles</cite> by Doris Schattschneider and Wallace
+          Walker, a book of paper solids covered in Escher's patterns.
+        </p>
+
+        <h3>The solids</h3>
+        <dl class="terms">
+          <dt>Platonic solids</dt>
+          <dd>
+            The five familiar solids whose faces are all the same regular polygon, with the same number of them
+            meeting at every corner: tetrahedron, cube, octahedron, dodecahedron, and icosahedron.
+          </dd>
+          <dt>Archimedean solids</dt>
+          <dd>
+            Thirteen solids with faces of two or three kinds of regular polygon, arranged the same way around
+            every corner.
+          </dd>
+          <dt>Catalan solids</dt>
+          <dd>
+            The duals of the Archimedean solids. Each has a face for every corner of its Archimedean partner
+            and a corner for every face. Their faces are all alike, but not regular.
+          </dd>
+          <dt>Stellations</dt>
+          <dd>
+            Star-shaped solids made by extending the faces of a polyhedron until they meet again.
+            In the menu, you can find the stellated octahedron (also called the stella octangula) and
+            the three stellations of the dodecahedron. The cube and tetrahedron do not have any stellations,
+            but the icosahedron has 59, which are not included here. Stellations can also be created
+            from other polyhedra, not just the Platonic solids.
+          </dd>
+        </dl>
+
+        <h3 id="about-symmetry">Symmetry groups</h3>
+        <p>
+          A symmetry of a solid is a way to turn or mirror it so that it ends up looking exactly as it did.
+          Turn a cube a quarter of the way around the line through the centers of two opposite faces, and
+          every face lands where another face was. Mirror it in a plane through its middle, and the same
+          happens. Together, a solid's symmetries form what mathematicians call a <em>group</em>: doing one
+          symmetry after another gives another symmetry, and every symmetry can be undone by one.
+        </p>
+        <p>
+          PolyPainter paints every dab once for each symmetry in the group you choose, moved by that
+          symmetry. The rings show where all the copies will land. So the number of
+          symmetries in a group, called its order, is the number of copies. It is also the number of
+          matching tiles the group divides the surface into: whatever you paint in one tile appears in
+          every other.
+        </p>
+
+        <h4>Turning only, or mirroring too</h4>
+        <p>
+          Some groups contain only rotations, and are called <em>chiral</em>. All of their copies are turned
+          versions of what you paint, so they keep its handedness: a spiral that winds clockwise winds
+          clockwise everywhere, and a letter R stays readable. Escher's designs on solids work this way, and
+          so this is the default. The other groups add mirror images, so half of the copies come out
+          reversed, as in a kaleidoscope. To see the difference, paint a small R with each group.
+        </p>
+
+        <h4>The groups</h4>
+        <p>
+          The cube and the octahedron have the same symmetries, and so do the dodecahedron and the
+          icosahedron, because they are duals.
+          Each group below is all or part of the symmetries of one of the Platonic solids.
+          The letters in parentheses are the Schoenflies notations for the groups.
+        </p>
+        <dl class="groups">
+          <dt>None</dt>
+          <dd>Strokes are not repeated.</dd>
+          <dt>Chiral tetrahedral (T) <span>12 copies · rotations only</span></dt>
+          <dd>
+            The rotations of a tetrahedron: thirds of a turn around each line through a corner and the center
+            of the opposite face, and half turns around each line through the midpoints of two opposite
+            edges.
+          </dd>
+          <dt>Full tetrahedral (Td) <span>24 copies · with mirror images</span></dt>
+          <dd>
+            T with mirror images added: all the symmetries of a tetrahedron. Its six mirror planes each run
+            through one edge and the midpoint of the opposite edge.
+          </dd>
+          <dt>Pyritohedral (Th) <span>24 copies · with mirror images</span></dt>
+          <dd>
+            T with different mirror images added, in the three planes through the center parallel to the
+            faces of a cube. It is named after the mineral pyrite, whose crystals have this symmetry, and it
+            is the largest group that the cube and the dodecahedron have in common.
+          </dd>
+          <dt>Chiral octahedral (O) <span>24 copies · rotations only</span></dt>
+          <dd>
+            The rotations of a cube: quarter turns around the lines through the centers of opposite faces,
+            thirds of a turn around the lines through opposite corners, and half turns around the lines
+            through the midpoints of opposite edges.
+          </dd>
+          <dt>Full octahedral (Oh) <span>48 copies · with mirror images</span></dt>
+          <dd>O with mirror images added: all the symmetries of a cube, with nine mirror planes.</dd>
+          <dt>Chiral icosahedral (I) <span>60 copies · rotations only</span></dt>
+          <dd>
+            The rotations of a dodecahedron: fifths of a turn around the lines through the centers of opposite
+            faces, thirds of a turn around the lines through opposite corners, and half turns around the lines
+            through the midpoints of opposite edges.
+          </dd>
+          <dt>Full icosahedral (Ih) <span>120 copies · with mirror images</span></dt>
+          <dd>I with mirror images added: all the symmetries of a dodecahedron, with 15 mirror planes.</dd>
+        </dl>
+
+        <h4>How the groups fit together</h4>
+        <figure class="group-diagram">
+          <svg viewBox="0 0 400 400" role="group" aria-labelledby="group-diagram-title" aria-describedby="group-diagram-desc">
+            <title id="group-diagram-title">How the symmetry groups fit together</title>
+            <desc id="group-diagram-desc">
+              None, with 1 copy, is part of T, with 12. T is part of Td, Th and O, with 24 copies each, and of I,
+              with 60. Td, Th and O are part of Oh, with 48. Th and I are part of Ih, with 120. Td is all the
+              symmetries of the tetrahedron, Oh of the cube and octahedron, and Ih of the dodecahedron and
+              icosahedron.
+            </desc>
+            <defs>
+              <!-- Drawn from src/polyhedra.js, shaded like the app's paper color. -->
+              <symbol id="solid-tetrahedron" viewBox="-1.05 -1.05 2.1 2.1"><g stroke="#1d1d1f" stroke-opacity=".4" stroke-width=".035" stroke-linejoin="round"><polygon points="0.763,0.516 -0.29,-0.705 -0.763,0.62" fill="#d4d1c9"/><polygon points="0.29,-0.431 -0.29,-0.705 0.763,0.516" fill="#c3c0b8"/></g></symbol>
+              <symbol id="solid-cube" viewBox="-1.05 -1.05 2.1 2.1"><g stroke="#1d1d1f" stroke-opacity=".4" stroke-width=".035" stroke-linejoin="round"><polygon points="0.097,0.859 0.097,-0.194 -0.811,-0.487 -0.811,0.567" fill="#dad6ce"/><polygon points="-0.811,-0.487 0.097,-0.194 0.811,-0.567 -0.097,-0.859" fill="#eae6dd"/><polygon points="0.811,-0.567 0.097,-0.194 0.097,0.859 0.811,0.487" fill="#b3b0a9"/></g></symbol>
+              <symbol id="solid-octahedron" viewBox="-1.05 -1.05 2.1 2.1"><g stroke="#1d1d1f" stroke-opacity=".4" stroke-width=".035" stroke-linejoin="round"><polygon points="-0.618,0.322 0.786,0.253 0,-0.912" fill="#e7e3db"/><polygon points="0,-0.912 0.786,0.253 0.618,-0.322" fill="#bebab3"/><polygon points="0,0.912 0.786,0.253 -0.618,0.322" fill="#b3b0a9"/><polygon points="-0.618,0.322 0,-0.912 -0.786,-0.253" fill="#e9e5dc"/></g></symbol>
+              <symbol id="solid-dodecahedron" viewBox="-1.05 -1.05 2.1 2.1"><g stroke="#1d1d1f" stroke-opacity=".4" stroke-width=".035" stroke-linejoin="round"><polygon points="-0.858,0.211 -0.297,0.391 0.097,-0.194 -0.22,-0.737 -0.811,-0.487" fill="#eeeae1"/><polygon points="0.22,-0.967 -0.22,-0.737 0.097,-0.194 0.735,-0.089 0.811,-0.567" fill="#e2ded6"/><polygon points="0.735,0.562 0.735,-0.089 0.097,-0.194 -0.297,0.391 0.097,0.859" fill="#c7c4bc"/><polygon points="-0.097,-0.859 -0.735,-0.562 -0.811,-0.487 -0.22,-0.737 0.22,-0.967" fill="#e3dfd7"/><polygon points="-0.811,0.567 -0.22,0.967 0.097,0.859 -0.297,0.391 -0.858,0.211" fill="#b6b3ac"/><polygon points="0.811,0.487 0.858,-0.211 0.811,-0.567 0.735,-0.089 0.735,0.562" fill="#b3b0a9"/></g></symbol>
+              <symbol id="solid-icosahedron" viewBox="-1.05 -1.05 2.1 2.1"><g stroke="#1d1d1f" stroke-opacity=".4" stroke-width=".035" stroke-linejoin="round"><polygon points="0.413,-0.643 -0.526,-0.205 0.344,0.385" fill="#e7e3db"/><polygon points="0.344,0.385 -0.526,-0.205 -0.526,0.754" fill="#d7d3cb"/><polygon points="-0.413,-0.909 -0.526,-0.205 0.413,-0.643" fill="#f2eee5"/><polygon points="-0.994,-0.046 -0.526,-0.205 -0.413,-0.909" fill="#e9e5dc"/><polygon points="-0.526,0.754 -0.526,-0.205 -0.994,-0.046" fill="#d8d4cc"/><polygon points="0.413,-0.643 0.344,0.385 0.994,0.046" fill="#c7c4bc"/><polygon points="0.413,0.909 0.344,0.385 -0.526,0.754" fill="#b3b0a9"/><polygon points="0.994,0.046 0.344,0.385 0.413,0.909" fill="#b3b0a9"/><polygon points="-0.413,-0.909 0.413,-0.643 0.526,-0.754" fill="#dbd7cf"/><polygon points="0.526,-0.754 0.413,-0.643 0.994,0.046" fill="#bebab3"/></g></symbol>
+            </defs>
+            <g class="axis" aria-hidden="true">
+              <text x="0" y="94">copies</text>
+              <line class="guide" x1="34" y1="112" x2="400" y2="112" />
+              <text x="26" y="112" dy="0.35em">120</text>
+              <line class="guide" x1="34" y1="166" x2="400" y2="166" />
+              <text x="26" y="166" dy="0.35em">60</text>
+              <line class="guide" x1="34" y1="220" x2="400" y2="220" />
+              <text x="26" y="220" dy="0.35em">48</text>
+              <line class="guide" x1="34" y1="274" x2="400" y2="274" />
+              <text x="26" y="274" dy="0.35em">24</text>
+              <line class="guide" x1="34" y1="328" x2="400" y2="328" />
+              <text x="26" y="328" dy="0.35em">12</text>
+              <line class="guide" x1="34" y1="382" x2="400" y2="382" />
+              <text x="26" y="382" dy="0.35em">1</text>
+            </g>
+            <!-- Each group and line belongs to the solids named in its classes, which
+                 light it up when the solid is pointed at. -->
+            <g class="lattice" aria-hidden="true">
+              <line class="connector t" x1="66" y1="76" x2="66" y2="260" />
+              <line class="connector o" x1="160" y1="76" x2="160" y2="206" />
+              <line class="connector i" x1="303" y1="76" x2="303" y2="98" />
+              <line class="edge t o i" x1="240" y1="382" x2="240" y2="328" />
+              <line class="edge t o" x1="240" y1="328" x2="66" y2="274" />
+              <line class="edge o" x1="240" y1="328" x2="160" y2="274" />
+              <line class="edge o i" x1="240" y1="328" x2="240" y2="274" />
+              <line class="edge i" x1="240" y1="328" x2="366" y2="166" />
+              <line class="edge o" x1="66" y1="274" x2="160" y2="220" />
+              <line class="edge o" x1="160" y1="274" x2="160" y2="220" />
+              <line class="edge o" x1="240" y1="274" x2="160" y2="220" />
+              <line class="edge i" x1="240" y1="274" x2="303" y2="112" />
+              <line class="edge i" x1="366" y1="166" x2="303" y2="112" />
+              <g class="node t o i" transform="translate(240 382)">
+                <rect x="-28" y="-14" width="56" height="28" rx="14" /><text dy="0.35em">None</text>
+              </g>
+              <g class="node t o i" transform="translate(240 328)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">T</text>
+              </g>
+              <g class="node mirrors t o" transform="translate(66 274)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">Td</text>
+              </g>
+              <g class="node o" transform="translate(160 274)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">O</text>
+              </g>
+              <g class="node mirrors o i" transform="translate(240 274)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">Th</text>
+              </g>
+              <g class="node mirrors o" transform="translate(160 220)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">Oh</text>
+              </g>
+              <g class="node i" transform="translate(366 166)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">I</text>
+              </g>
+              <g class="node mirrors i" transform="translate(303 112)">
+                <rect x="-26" y="-14" width="52" height="28" rx="14" /><text dy="0.35em">Ih</text>
+              </g>
+            </g>
+            <g class="solid t" tabindex="0" aria-label="Tetrahedron: Td, T and none">
+              <rect x="26" y="1" width="80" height="75" rx="8" />
+              <use href="#solid-tetrahedron" x="49" y="5" width="34" height="34" />
+              <text x="66" y="60">Tetrahedron</text>
+            </g>
+            <g class="solid o" tabindex="0" aria-label="Cube and octahedron: Oh, Td, Th, O, T and none">
+              <rect x="118" y="1" width="84" height="75" rx="8" />
+              <use href="#solid-cube" x="125" y="5" width="34" height="34" />
+              <use href="#solid-octahedron" x="161" y="5" width="34" height="34" />
+              <text x="160" y="54">Cube</text>
+              <text x="160" y="67">Octahedron</text>
+            </g>
+            <g class="solid i" tabindex="0" aria-label="Dodecahedron and icosahedron: Ih, Th, I, T and none">
+              <rect x="257" y="1" width="92" height="75" rx="8" />
+              <use href="#solid-dodecahedron" x="268" y="5" width="34" height="34" />
+              <use href="#solid-icosahedron" x="304" y="5" width="34" height="34" />
+              <text x="303" y="54">Dodecahedron</text>
+              <text x="303" y="67">Icosahedron</text>
+            </g>
+          </svg>
+          <figcaption>
+            <span class="key"><span class="key-node"></span>Rotations only</span>
+            <span class="key"><span class="key-node mirrors"></span>With mirror images</span>
+            <span>Point at or tap a solid to light up its groups.</span>
+          </figcaption>
+        </figure>
+        <p>
+          Each group is joined by lines to the bigger groups above it that contain it, and the numbers on
+          the left count the copies each row makes. A solid has every group it can reach by going down the
+          lines from its own group, the one its dashed line leads to.
+        </p>
+        <p>
+          The Symmetry menu lists the groups that the current solid has. The tetrahedron and the solids built
+          from it offer T and Td. Those built from the cube or the octahedron offer T, Td, Th, O and Oh, and
+          those built from the dodecahedron or the icosahedron offer T, Th, I and Ih. A dodecahedron has the
+          rotations of a tetrahedron hidden in it, but no quarter turns and none of the tetrahedron's
+          mirrors. The snub cube, the snub dodecahedron and their Catalan duals come in left- and
+          right-handed forms that are mirror images of each other, so they offer rotations only.
+        </p>
+
+        <h4>What the names mean</h4>
+        <p>
+          The letters, called Schoenflies notation, name the solid that a group belongs to: T for
+          tetrahedron, O for octahedron and I for icosahedron, with h or d added for groups with mirror
+          images. The digits under the menu are John Conway's orbifold notation, which describes the pattern
+          itself. Each digit is a kind of point the pattern turns around, and says how many times the
+          pattern repeats in one full turn: in 532 there are points it repeats around five times, three
+          times and twice. An asterisk stands for mirrors. A digit after it marks a point where that many
+          mirrors cross, and a digit before it a center of rotation that lies on no mirror. So in *532,
+          mirrors cross in fives, threes and twos, and in 3*2 there are threefold centers away from the
+          mirrors and points where two mirrors cross.
+        </p>
+
+        <p class="credits">
+          Built with <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>. The source code is
+          on <a href="https://github.com/papjuli/polypainter" target="_blank" rel="noopener">GitHub</a>.
+        </p>
+      </div>
     </dialog>
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -15,6 +15,13 @@ Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
   Each solid offers the polyhedral groups it has, for example on the cube:
   none, T, Td, Th, O and Oh. The default is the solid's rotation group, as in
   Escher's designs.
+<!-- - About, beside the title, describes the families of solids and explains the
+  symmetry groups: what makes a symmetry, how many copies each group makes,
+  rotations against reflections, which solids offer which groups, and what
+  the Schoenflies and orbifold names mean. A diagram shows how the groups
+  contain one another and which of them each Platonic solid has; pointing at
+  a solid lights up its groups. The link under the Symmetry menu opens it at
+  the groups. -->
 - Drag on the solid to paint; strokes carry on across edges and corners. Rings
   show where the brush and all of its copies will land.
 - With the Fill tool, click to fill the area of the color under the pointer,

@@ -42,6 +42,8 @@ const exportForm = document.getElementById('export-form');
 const exportStatus = document.getElementById('export-status');
 const exportModelButton = document.getElementById('export-model');
 const modelStatus = document.getElementById('model-status');
+const aboutDialog = document.getElementById('about-dialog');
+const aboutBody = document.getElementById('about-body');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -339,14 +341,37 @@ redoButton.addEventListener('click', () => runCommand(() => painter.redo()));
 clearButton.addEventListener('click', () => runCommand(() => painter.clear()));
 
 window.addEventListener('keydown', (event) => {
-  // The painting behind the export dialog stays as it is while the dialog is
-  // open, so the net exports what the user saw.
-  if (exportDialog.open || !(event.ctrlKey || event.metaKey)) return;
+  // The painting behind a dialog stays as it is while the dialog is open, so
+  // the net exports what the user saw, and nothing changes out of sight.
+  if (exportDialog.open || aboutDialog.open || !(event.ctrlKey || event.metaKey)) return;
   const key = event.key.toLowerCase();
   if (key === 'z' && !event.shiftKey) runCommand(() => painter.undo());
   else if (key === 'y' || (key === 'z' && event.shiftKey)) runCommand(() => painter.redo());
   else return;
   event.preventDefault();
+});
+
+// The About dialog opens at the top, or at the explanation of the symmetry
+// groups when opened from the link under the Symmetry menu.
+function showAbout(section) {
+  aboutDialog.showModal();
+  if (section) section.scrollIntoView({ block: 'start' });
+  else aboutBody.scrollTop = 0;
+}
+document.getElementById('about').addEventListener('click', () => showAbout());
+document
+  .getElementById('about-symmetry-link')
+  .addEventListener('click', () => showAbout(document.getElementById('about-symmetry')));
+
+// A click on the backdrop closes the About dialog. Its contents fill it, so
+// only the backdrop's clicks reach the dialog element itself. A press that
+// starts inside, such as selecting text and letting go outside, doesn't count.
+let pressedOnBackdrop = false;
+aboutDialog.addEventListener('pointerdown', (event) => {
+  pressedOnBackdrop = event.target === aboutDialog;
+});
+aboutDialog.addEventListener('click', (event) => {
+  if (pressedOnBackdrop && event.target === aboutDialog) aboutDialog.close();
 });
 
 showEdges.addEventListener('change', () => {

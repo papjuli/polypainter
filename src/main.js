@@ -238,8 +238,8 @@ function describeSymmetry() {
   symmetryNote.textContent =
     group.order === 1
       ? 'Strokes are not repeated.'
-      : `${group.order} copies · ${group.reflections ? 'rotations and reflections' : 'rotations only'} · ` +
-        `orbifold ${group.orbifold}`;
+      : `${group.order} copies · ${group.reflections ? 'rotations and reflections' : 'rotations only'}`
+        //  + ` · orbifold ${group.orbifold}`;
 }
 
 symmetrySelect.addEventListener('change', () => {

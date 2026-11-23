@@ -83,7 +83,11 @@ h1 {
   backdrop-filter: blur(8px);
 }
 
+/* Sized to the chosen solid's name rather than the longest one. Chrome also
+   leaves room for the indent of options inside their family's group, so
+   without this the picker is wider than any name needs. */
 .picker {
+  field-sizing: content;
   max-width: 100%;
   padding: 8px 12px;
   border-radius: 10px;
@@ -303,6 +307,10 @@ input[type='range'] {
   background: var(--panel);
 }
 
+#about .narrow {
+  display: none;
+}
+
 /* Shown even on phones, where the other notes are hidden, since it reports
    a failed export. */
 #model-status {
@@ -338,8 +346,45 @@ input[type='range'] {
     inset: auto;
   }
 
+  /* The title, About and the picker share one row, tight enough that the
+     longest names fit on a typical phone. On narrower screens they are cut
+     short rather than pushing the picker onto a row of its own. */
   .toolbar {
     order: -1;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .title {
+    flex: none;
+    gap: 8px;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+
+  .picker {
+    min-width: 0;
+    padding: 8px 6px 8px 10px;
+    font-size: 14px;
+    text-overflow: ellipsis;
+  }
+
+  #about {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    font-weight: 600;
+  }
+
+  #about .wide {
+    display: none;
+  }
+
+  #about .narrow {
+    display: inline;
   }
 
   #viewport {

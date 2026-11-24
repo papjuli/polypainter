@@ -10,6 +10,10 @@ import { symmetryGroups } from './symmetry.js';
 import './style.css';
 
 const PALETTE = ['#1d1d1f', '#b23a2e', '#e08a3c', '#e9c46a', '#5a8f4e', '#2a9d8f', '#2f6690', '#7a4e9a'];
+// How many custom colors the memo under the swatches keeps: one row of them.
+const RECENT_COLOR_COUNT = 10;
+// Where the memo is saved, so the colors are still there on the next visit.
+const RECENT_COLORS_KEY = 'polypainter.recentColors';
 // Brush radius per step of the size slider, in world units (the solids have
 // a circumradius of 1).
 const BRUSH_RADIUS_STEP = 0.004;
@@ -31,6 +35,7 @@ const toolPicker = document.getElementById('tool-picker');
 const swatches = document.getElementById('swatches');
 const transparentSwatch = document.getElementById('transparent-color');
 const customColor = document.getElementById('custom-color');
+const recentSwatches = document.getElementById('recent-colors');
 const brushSize = document.getElementById('brush-size');
 const undoButton = document.getElementById('undo');
 const redoButton = document.getElementById('redo');
@@ -281,9 +286,11 @@ for (const button of toolPicker.children) {
 
 // A THREE.Color, or null to paint transparent.
 let brushColor = null;
+let selectedSwatch = null;
 
 function setColor(color, swatch) {
   brushColor = color;
+  selectedSwatch = swatch;
   for (const element of swatches.children) {
     element.classList.toggle('selected', element === swatch);
     if (element instanceof HTMLButtonElement) element.setAttribute('aria-pressed', String(element === swatch));
@@ -303,6 +310,59 @@ for (const hex of PALETTE) {
 }
 transparentSwatch.addEventListener('click', () => setColor(null, transparentSwatch));
 customColor.addEventListener('input', () => setColor(new THREE.Color(customColor.value), customColor));
+
+// The memo of custom colors, most recently used first, as lowercase hex like
+// the color input's value. Storage can be missing or blocked, as in some
+// private windows, and then the memo lasts only until the page is closed.
+let recentColors = [];
+try {
+  const saved = JSON.parse(localStorage.getItem(RECENT_COLORS_KEY));
+  if (Array.isArray(saved)) {
+    recentColors = saved.filter((hex) => /^#[0-9a-f]{6}$/.test(hex)).slice(0, RECENT_COLOR_COUNT);
+  }
+} catch {
+  // Start with an empty memo.
+}
+
+// A remembered color goes back into the custom color, rather than selecting
+// its own swatch, so the memo can reorder without moving the selection, and
+// the color picker opens on it, ready to be adjusted.
+function showRecentColors() {
+  recentSwatches.replaceChildren(
+    ...recentColors.map((hex) => {
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'swatch';
+      swatch.style.background = hex;
+      swatch.setAttribute('aria-label', `Recent color ${hex}`);
+      swatch.addEventListener('click', () => {
+        customColor.value = hex;
+        setColor(new THREE.Color(hex), customColor);
+      });
+      return swatch;
+    }),
+  );
+  recentSwatches.hidden = recentColors.length === 0;
+}
+
+// The custom color, if that is what the brush holds, or else null.
+const customBrushColor = () => (selectedSwatch === customColor ? customColor.value : null);
+
+// Moves a color to the front of the memo. This happens only once it has been
+// painted with, so colors merely tried out in the picker don't crowd out the
+// ones in use. It waits for the end of a stroke, because on phones the memo's
+// first row makes the view shorter, which would move the solid under the
+// finger mid-stroke.
+function rememberColor(hex) {
+  if (hex === null) return;
+  recentColors = [hex, ...recentColors.filter((other) => other !== hex)].slice(0, RECENT_COLOR_COUNT);
+  try {
+    localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(recentColors));
+  } catch {
+    // Keep the memo for this visit only.
+  }
+  showRecentColors();
+}
 
 // Takes up the color painted at a point on the solid. A palette color selects
 // its own swatch; any other color goes into the custom color.
@@ -329,6 +389,8 @@ function updateHistoryButtons() {
 }
 
 let strokePointer = null;
+// The custom color the current stroke paints with, kept for the memo.
+let strokeCustomColor = null;
 
 function runCommand(command) {
   if (strokePointer !== null) return;
@@ -526,10 +588,12 @@ viewport.addEventListener(
     }
     if (tool === 'fill') {
       runCommand(() => painter.bucketFill(point, { group: current.painting.group, color: brushColor }));
+      rememberColor(customBrushColor());
       showCursor(point);
       return;
     }
     strokePointer = event.pointerId;
+    strokeCustomColor = tool === 'erase' ? null : customBrushColor();
     viewport.setPointerCapture(event.pointerId);
     painter.beginStroke(point, {
       group: current.painting.group,
@@ -559,6 +623,7 @@ function endStroke(event) {
   if (event.pointerId !== strokePointer) return;
   painter.endStroke();
   strokePointer = null;
+  rememberColor(strokeCustomColor);
   if (event.pointerType === 'touch') hideCursor();
   updateHistoryButtons();
 }
@@ -598,6 +663,7 @@ new ResizeObserver(resize).observe(viewport);
 resize();
 
 setColor(new THREE.Color(PALETTE[0]), swatches.children[0]);
+showRecentColors();
 setTool('paint');
 select('cube');
 

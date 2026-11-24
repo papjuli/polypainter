@@ -33,6 +33,9 @@ Try it here: **https://papjuli.github.io/polypainter/**.
   as it was painted. Clicking a hole picks transparent paint. Then the tool
   goes back to painting or filling. Alt+click (Option+click on a Mac) picks a
   color with the Paint, Fill and Erase tools too.
+- Custom colors you paint or fill with are remembered in a row under the
+  swatches, the most recent first, up to ten of them, and kept for your next
+  visit. Click one to make it the custom color again.
 - Drag around the solid, or right-drag, to rotate it; scroll or pinch to zoom.
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its

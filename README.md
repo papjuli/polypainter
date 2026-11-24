@@ -107,7 +107,8 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   as the planes that have all the vertices on one side. The Catalan solids are
   the Archimedean ones' duals, with a vertex at the pole of each face's plane
   and a face around each vertex. The stellated ones put a pyramid on
-  each face of a Platonic solid, or sink one into it. Each face gets a 2D
+  each face of a Platonic solid or the rhombic dodecahedron, or sink one into
+  it. Each face gets a 2D
   coordinate frame. All the solids are star-shaped around their center, which
   is how a point is put onto the surface.
 - `src/symmetry.js` finds each solid's full symmetry group, the matrices that

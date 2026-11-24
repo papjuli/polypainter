@@ -13,8 +13,9 @@ const BETA = XI * PHI + PHI ** 2 + PHI / XI;
 // The Platonic and Archimedean solids are uniform: their vertices are the
 // images of one vertex, `seed`, under their symmetry group. The Catalan solids
 // are the duals of the Archimedean ones, each named by `dual`. The stellated
-// ones have a pyramid on each face of a Platonic solid, with sides `spike`
-// times its edges long, or sunk into it when `spike` is negative.
+// ones have a pyramid on each face of a `base` solid, with its shortest sides
+// `spike` times the face's edges long, or sunk into it when `spike` is
+// negative.
 const DEFINITIONS = [
   { family: 'Platonic solids', id: 'tetrahedron', name: 'Tetrahedron', group: TETRAHEDRAL, seed: [1, 1, 1] },
   { family: 'Platonic solids', id: 'cube', name: 'Cube', group: OCTAHEDRAL, seed: [1, 1, 1] },
@@ -204,6 +205,18 @@ const DEFINITIONS = [
     base: 'icosahedron',
     spike: PHI,
   },
+  // The first stellation of the rhombic dodecahedron, which M.C. Escher drew
+  // on a tower in his print Waterfall. The pyramids' sides from the rhombi's
+  // obtuse corners are as long as the rhombi's edges. Their apexes and the
+  // rhombi's acute corners are the corners of three flattened octahedra, whose
+  // compound this solid is.
+  {
+    family: 'Stellations',
+    id: 'eschers-solid',
+    name: "Escher's solid",
+    base: 'rhombic-dodecahedron',
+    spike: 1,
+  },
 ];
 
 const centroid = (points) => points.reduce((sum, point) => sum.add(point), new Vector3()).divideScalar(points.length);
@@ -257,8 +270,10 @@ function findFaces(vertices) {
   return faces;
 }
 
-// Puts a pyramid on each face of a polyhedron, with sides `spike` times the
-// face's edges long, sunk into the face when `spike` is negative. The faces
+// Puts a pyramid on each face of a polyhedron, with its apex above the face's
+// center and its shortest sides `spike` times the face's edges long, sunk into
+// the face when `spike` is negative. The shortest sides run to the corners
+// nearest the center, which on a regular face are all of them. The faces
 // themselves are hidden, leaving the pyramids' sides.
 function stellate({ vertices, faces }, spike) {
   const points = [...vertices];
@@ -270,7 +285,8 @@ function stellate({ vertices, faces }, spike) {
       .cross(new Vector3().subVectors(corners[2], corners[0]))
       .normalize();
     const side = spike * corners[0].distanceTo(corners[1]);
-    const height = Math.sign(spike) * Math.sqrt(side ** 2 - center.distanceToSquared(corners[0]));
+    const nearest = Math.min(...corners.map((corner) => center.distanceToSquared(corner)));
+    const height = Math.sign(spike) * Math.sqrt(side ** 2 - nearest);
     const apex = points.push(center.addScaledVector(normal, height)) - 1;
     return face.map((a, i) => [a, face[(i + 1) % face.length], apex]);
   });

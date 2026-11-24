@@ -378,8 +378,6 @@ input[type='range'] {
 }
 
 .actions button,
-#export-net,
-#export-model,
 #about,
 #reset-view {
   background: var(--control);
@@ -389,6 +387,14 @@ input[type='range'] {
 .actions button {
   flex: 1;
   padding: 6px 0;
+}
+
+/* Halves of the panel are too narrow for "Export 3D model" on one line, so
+   each export button is as wide as its label plus an equal share of the
+   space left over. */
+#export-net,
+#export-model {
+  flex: auto;
 }
 
 .checkbox {

@@ -94,6 +94,112 @@ h1 {
   font-size: 15px;
 }
 
+/* Where the browser lets the list of options be styled, the drop-downs draw
+   their lists in the page, in the app's own style. Touch screens keep the
+   browser's own list, which is easier to use with a finger. */
+@supports (appearance: base-select) {
+  @media not (pointer: coarse) {
+    .dropdown,
+    .dropdown::picker(select) {
+      appearance: base-select;
+    }
+
+    .dropdown {
+      gap: 10px;
+    }
+
+    /* The same chevron as the browser's own drop-downs, rather than a solid
+       triangle. */
+    .dropdown::picker-icon {
+      content: '';
+      width: 6px;
+      height: 6px;
+      align-self: center;
+      margin: 0 2px 4px auto;
+      border: solid currentColor;
+      border-width: 0 1.5px 1.5px 0;
+      transform: rotate(45deg);
+    }
+
+    /* The list keeps a small gap to its select and a larger one to the
+       window's edge. When there is no room below, flipping it keeps the
+       gaps on the right sides, which the browser's own fallbacks don't. */
+    .dropdown::picker(select) {
+      position-try-fallbacks: flip-block;
+      margin: 6px 0 16px;
+      padding: 6px;
+      background: #1e212a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+    }
+
+    .dropdown option {
+      min-height: 0;
+      padding: 4px 12px 4px 10px;
+      border-radius: 6px;
+      background: transparent;
+    }
+
+    .dropdown option:hover,
+    .dropdown option:focus-visible {
+      background: rgb(255 255 255 / 8%);
+      outline: none;
+    }
+
+    .dropdown option::checkmark {
+      color: var(--accent);
+    }
+
+    /* The browser's own list starts at the picker's left edge and is as wide
+       as the longest name, so with the picker at the right of the window it
+       hangs past the window's edge. This one lines up with the picker's
+       right edge instead. */
+    .picker::picker(select) {
+      position-area: block-end span-inline-start;
+      position-try-fallbacks: block-end span-inline-end;
+    }
+
+    /* The picker shows the chosen name in a button of its own, which is
+       only there so that a long name can be cut short in a narrow window.
+       The browser's own name in the picker can't be. */
+    .picker > button {
+      display: contents;
+    }
+
+    .picker selectedcontent {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* Family names are set like the labels in the tools panel. Their
+       padding indents the label, and the options undo it. */
+    .picker optgroup {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 4px 10px;
+    }
+
+    .picker optgroup + optgroup {
+      margin-top: 8px;
+    }
+
+    .picker optgroup > option {
+      margin: 0 -10px;
+      font-size: 15px;
+      font-weight: 400;
+      letter-spacing: normal;
+      text-transform: none;
+      color: var(--text);
+    }
+  }
+}
+
 button {
   font: inherit;
   font-size: 14px;

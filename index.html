@@ -15,13 +15,15 @@
           <span class="wide">About</span><span class="narrow">?</span>
         </button>
       </div>
-      <select id="solid-picker" class="picker" aria-label="Choose a solid"></select>
+      <select id="solid-picker" class="picker dropdown" aria-label="Choose a solid">
+        <button type="button"><selectedcontent></selectedcontent></button>
+      </select>
     </header>
 
     <aside class="tools" aria-label="Painting tools">
       <div class="field symmetry">
         <label for="symmetry">Symmetry</label>
-        <select id="symmetry"></select>
+        <select id="symmetry" class="dropdown"></select>
         <p id="symmetry-note" class="note"></p>
         <button id="about-symmetry-link" class="link" type="button" aria-haspopup="dialog" aria-controls="about-dialog">
           What are these groups?
@@ -81,7 +83,7 @@
         <h2 id="export-title">Export net</h2>
         <div class="field">
           <label for="assembly-method">Assembly method</label>
-          <select id="assembly-method">
+          <select id="assembly-method" class="dropdown">
             <option value="glue">Glue tabs (original)</option>
             <option value="interlocking">Rectangular tabs (no glue)</option>
           </select>

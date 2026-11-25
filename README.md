@@ -48,6 +48,9 @@ Try it here: **https://papjuli.github.io/polypainter/**.
   The Rotate tool makes every drag rotate.
 - Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z. Each solid keeps its
   own painting.
+- Ctrl+S (Cmd+S on a Mac) saves a screenshot: a 2048 × 2048 PNG of the solid
+  as you see it, centered, on a transparent background. The brush rings are
+  left out.
 - Export net opens a menu to choose glue tabs or rectangular tabs
   that assemble without glue. The
   painted solid downloads on an A4 page as a PNG to print at 100% scale. Cut

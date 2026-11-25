@@ -56,7 +56,10 @@ const modelStatus = document.getElementById('model-status');
 const aboutDialog = document.getElementById('about-dialog');
 const aboutBody = document.getElementById('about-body');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// The canvas has an alpha channel so that a screenshot can leave out the
+// background. On screen the scene's background covers it, and the page behind
+// the canvas is the same color anyway.
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 viewport.appendChild(renderer.domElement);
 
@@ -482,6 +485,8 @@ window.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'z' && !event.shiftKey) runCommand(() => painter.undo());
   else if (key === 'y' || (key === 'z' && event.shiftKey)) runCommand(() => painter.redo());
+  // Holding the keys down would otherwise save a screenshot with every repeat.
+  else if (key === 's') { if (!event.repeat) takeScreenshot(); }
   else return;
   event.preventDefault();
 });
@@ -620,6 +625,42 @@ exportModelButton.addEventListener('click', async () => {
     exportModelButton.disabled = false;
   }
 });
+
+// A screenshot shows the solid alone on a transparent background, framed by
+// the square it is fitted to on screen, but centered and at a fixed size
+// however large the window is.
+const SCREENSHOT_SIZE = 2048;
+
+function takeScreenshot() {
+  // A copy of the camera, so the view on screen is left alone. The key light
+  // still rides along with the real camera, which stands in the same place.
+  const shotCamera = camera.clone(false);
+  shotCamera.clearViewOffset();
+  shotCamera.aspect = 1;
+  shotCamera.fov = FIT_FOV;
+  shotCamera.updateProjectionMatrix();
+
+  painter.flush();
+  const size = renderer.getSize(new THREE.Vector2());
+  const pixelRatio = renderer.getPixelRatio();
+  const { background } = scene;
+  const cursorShown = cursor.visible;
+  scene.background = null;
+  cursor.visible = false;
+  renderer.setDrawingBufferSize(SCREENSHOT_SIZE, SCREENSHOT_SIZE, 1);
+  renderer.render(scene, shotCamera);
+  // The canvas keeps what was drawn only until the page is next painted, so
+  // it has to be copied now. toBlob takes the copy at once and encodes it
+  // later. Its CSS size is left as it was, so the page doesn't move, and the
+  // next frame draws the view on screen again before anyone sees this one.
+  const name = `polypainter-${current.painting.polyhedron.id}.png`;
+  renderer.domElement.toBlob((blob) => {
+    if (blob) download(blob, name);
+  });
+  renderer.setDrawingBufferSize(size.x, size.y, pixelRatio);
+  scene.background = background;
+  cursor.visible = cursorShown;
+}
 
 resetButton.addEventListener('click', () => controls.reset());
 

@@ -147,6 +147,29 @@ const bucketShader = {
   `,
 };
 
+// Sets single pixels of the atlas to the given colors, replacing what was
+// there. Positions are pixel centers in atlas texels.
+const pixelShader = {
+  vertexShader: /* glsl */ `
+    attribute vec4 pixelColor;
+
+    varying vec4 vColor;
+
+    void main() {
+      vColor = pixelColor;
+      gl_PointSize = 1.0;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy, 0.0, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    varying vec4 vColor;
+
+    void main() {
+      gl_FragColor = vColor;
+    }
+  `,
+};
+
 // Paints on a polyhedron's surface, repeating every dab by a symmetry group.
 //
 // A painting is { polyhedron, layout, history, redoStack }, where the history
@@ -189,6 +212,14 @@ export class Painter {
     this.bucket.frustumCulled = false;
     this.bucketScene = new THREE.Scene();
     this.bucketScene.add(this.bucket);
+
+    this.rimPixels = new THREE.Points(
+      new THREE.BufferGeometry(),
+      new THREE.ShaderMaterial({ ...pixelShader, blending: THREE.NoBlending, depthTest: false, depthWrite: false }),
+    );
+    this.rimPixels.frustumCulled = false;
+    this.rimScene = new THREE.Scene();
+    this.rimScene.add(this.rimPixels);
   }
 
   get texture() {
@@ -284,9 +315,9 @@ export class Painter {
         y: originY + (yx * x + yy * y) * layout.density,
       };
     });
-    const runs = floodFill(polyhedron, layout, this.readPixels(), seeds, color);
+    const { runs, rim } = floodFill(polyhedron, layout, this.readPixels(), seeds, color);
     if (runs.length === 0) return;
-    const action = { type: 'bucket', color: color?.clone() ?? null, runs };
+    const action = { type: 'bucket', color: color?.clone() ?? null, runs, rim };
     this.record(action);
     this.apply(action);
   }
@@ -410,8 +441,10 @@ export class Painter {
     }
   }
 
-  // `runs` lists the filled pixels as [start, end) ranges of pixel indices.
-  drawBucket({ color, runs }) {
+  // `runs` lists the filled pixels as [start, end) ranges of pixel indices,
+  // and `rim` the pixels around them that the fill blends into, with their
+  // new colors (see floodFill()).
+  drawBucket({ color, runs, rim }) {
     // Draws the dabs queued so far first, so they end up under the fill.
     this.flush();
     const { width, height } = this.painting.layout;
@@ -425,6 +458,26 @@ export class Painter {
     setPaintBlending(material, color === null);
     this.drawOver(this.bucketScene);
     texture.dispose();
+    this.drawPixels(rim);
+  }
+
+  // Sets the given pixels to the given colors, linear RGBA with the alpha
+  // premultiplied.
+  drawPixels({ pixels, colors }) {
+    if (pixels.length === 0) return;
+    const { width } = this.painting.layout;
+    const positions = new Float32Array(pixels.length * 3);
+    pixels.forEach((i, k) => {
+      const u = i % width;
+      positions[3 * k] = u + 0.5;
+      positions[3 * k + 1] = (i - u) / width + 0.5;
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('pixelColor', new THREE.BufferAttribute(colors, 4));
+    this.rimPixels.geometry = geometry;
+    this.drawOver(this.rimScene);
+    geometry.dispose();
   }
 
   addDab(point) {

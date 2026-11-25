@@ -14,7 +14,7 @@ npm run preview    # serve the production build
 npm test           # node src/net.test.js && node src/model.test.js && node src/fill.test.js
 ```
 
-`npm test` runs three plain Node scripts using `node:assert`. There is no test runner, linter or formatter. `src/net.test.js` checks that the saved nets in `src/nets/` still match the faces built by `src/polyhedra.js`, fit the page without overlaps, and have well-formed tabs and slits, and that DXF slits stay straight. `src/model.test.js` checks the glTF export of every solid: file framing, triangle winding, and texture coordinates. `src/fill.test.js` checks that a bucket fill of every unpainted solid, at the atlas size the app uses, reaches every pixel of every face and cell margin, and that a fill stops at a band painted around the solid; it takes several seconds.
+`npm test` runs three plain Node scripts using `node:assert`. There is no test runner, linter or formatter. `src/net.test.js` checks that the saved nets in `src/nets/` still match the faces built by `src/polyhedra.js`, fit the page without overlaps, and have well-formed tabs and slits, and that DXF slits stay straight. `src/model.test.js` checks the glTF export of every solid: file framing, triangle winding, and texture coordinates. `src/fill.test.js` checks that a bucket fill of every unpainted solid, at the atlas size the app uses, reaches every pixel of every face and cell margin, that a fill stops at a band painted around the solid, and that a fill beside a soft edge blends into it without leaving a halo of the old color; it takes several seconds.
 
 Nets are laid out ahead of time in Python (3.9+, standard library only; it also calls `node`). Use the venv:
 
@@ -46,7 +46,7 @@ To add a solid, add an entry to `DEFINITIONS` in `src/polyhedra.js` (a convex `s
 ### Painting (`src/painter.js`, `src/main.js`)
 
 - Each solid has its own `painting` (`polyhedron`, `layout`, `groups`, `group`, `history`, `redoStack`), created in `main.js`. A single `Painter` renders whichever painting is loaded into a `WebGLRenderTarget` atlas with one cell per face.
-- **The history is the source of truth. The texture is only a rendering of it.** Undo, switching solids and `load()` all redraw by replaying actions after the last `clear`. The action types are `stroke` (sampled surface points + group/color/radius), `bucket` (pixel runs from `src/fill.js`) and `clear`.
+- **The history is the source of truth. The texture is only a rendering of it.** Undo, switching solids and `load()` all redraw by replaying actions after the last `clear`. The action types are `stroke` (sampled surface points + group/color/radius), `bucket` (pixel runs from `src/fill.js`, plus the new colors of the soft-edge pixels it blends into, which the painter writes as single-pixel points) and `clear`.
 - A dab paints a ball meeting the surface. It is projected onto every face plane it touches and then repeated through `group.elements[*].faceMaps`. Dabs are queued as instanced quads and drawn in `flush()`, which the render loop calls every frame and which `readPixels`/`drawBucket` call first.
 - The texture stores **premultiplied alpha**. A color of `null` means transparent paint, which uses different blending, so it is batched separately. `main.js` patches the material's `map_fragment` to un-premultiply, and `toCanvas()` un-premultiplies for 2D canvas use.
 - The atlas is bottom-row-first (GL convention). Cells have a `CELL_MARGIN` so texture filtering at edges doesn't pick up unpainted texels.

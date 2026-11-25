@@ -123,8 +123,11 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   so the edges of transparent paint blend as cleanly as those of colors. The
   Pick tool reads its color from the texture, not from the rendered scene.
 - `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
-  its neighbor's where the fill reaches an edge. A fill is stored as the runs
-  of pixels it covers.
+  its neighbor's where the fill reaches an edge. The pixels at the soft edge of
+  a stroke beside the fill hold some of the color filled over, so the fill
+  replaces just that share of them with its own color, leaving no halo. A fill
+  is stored as the runs of pixels it covers and the new colors of those at its
+  edge.
 - `tools/unfold.py` unfolds a solid by growing the net across the edges of
   its faces, leaving out faces that would overlap it or leave no room for a
   tab, which start further pieces. Every cut edge gets a tab. It tries a few

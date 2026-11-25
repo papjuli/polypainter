@@ -1,7 +1,7 @@
 # PolyPainter
 
-Paint on the Platonic, Archimedean and Catalan solids and on stellated ones,
-with symmetry, in the spirit of
+Paint on the Platonic, Archimedean and Catalan solids, on stellated ones and
+on kaleidocycles, with symmetry, in the spirit of
 *M.C. Escher Kaleidocycles* by Doris Schattschneider and Wallace Walker: every
 stroke is repeated over the whole surface by a symmetry group of the solid.
 Built with [three.js](https://threejs.org) and [Vite](https://vite.dev).
@@ -11,11 +11,19 @@ Try it here: **https://papjuli.github.io/polypainter/**.
 ## Using it
 
 - Pick a solid from the toolbar: the five Platonic solids, the 13 Archimedean
-  solids, their duals the 13 Catalan solids, or an available stellated polyhedron.
+  solids, their duals the 13 Catalan solids, an available stellated polyhedron,
+  or a kaleidocycle of six, eight or ten tetrahedra.
   Then pick a symmetry group.
   Each solid offers the polyhedral groups it has, for example on the cube:
   none, T, Td, Th, O and Oh. The default is the solid's rotation group, as in
   Escher's designs.
+- A kaleidocycle turns through its own middle, showing four sides in turn.
+  Drag the Turn slider or press Play to turn it, and paint the faces as they
+  come into view. Its symmetry groups follow the motion: Around the ring, the
+  default, repeats strokes on every other tetrahedron and leaves the four
+  sides free for four different pictures; Every half turn and Every quarter
+  turn make two or all four of them alike; Every face puts a copy on every
+  face, without or with mirror images.
 <!-- - About, beside the title, describes the families of solids and explains the
   symmetry groups: what makes a symmetry, how many copies each group makes,
   rotations against reflections, which solids offer which groups, and what
@@ -52,7 +60,10 @@ Try it here: **https://papjuli.github.io/polypainter/**.
   is transparent, and perforated folds, with a frame the size of the page.
   Where a solid can't be unfolded in one piece with room for every connector,
   the net comes in a few pieces. Rectangular tabs need more room, so with them
-  most solids come in several pieces.
+  most solids come in several pieces. A kaleidocycle comes as the usual strip
+  of triangles, a row for each tetrahedron, with glue tabs only, as turning it
+  pulls on its seams. Roll the strip into a tube, glued down its side, and
+  then glue the ends of the tube together into a ring.
 - To print and cut with Silhouette Studio, place the PNG on an A4 page and the
   DXF over it, lined up by its frame. Ungroup the DXF and delete the frame. The
   net keeps clear of the corners where the registration marks go.
@@ -61,7 +72,8 @@ Try it here: **https://papjuli.github.io/polypainter/**.
   with File → Import → glTF 2.0 and switch the viewport to Material Preview
   (Z) to see the paint, which the default Solid view leaves out. The solid's
   outermost corners lie 1 m from its center, and holes from transparent
-  paint stay see-through. Each face comes in as a separate piece, since it
+  paint stay see-through. A kaleidocycle comes out as it stands, turned as
+  far as it is in the app. Each face comes in as a separate piece, since it
   has its own part of the texture. To join them, select everything in Edit
   Mode and use Mesh → Clean Up → Merge by Distance, then Limited Dissolve to
   turn the triangles back into the solid's faces.
@@ -83,7 +95,7 @@ Try it here: **https://papjuli.github.io/polypainter/**.
 npm install
 npm run dev      # start the dev server
 npm run build    # production build in dist/
-npm test         # check the nets, 3D models and fills of all solids
+npm test         # check the nets, 3D models, kaleidocycles and fills of all solids
 ```
 
 The nets are laid out ahead of time in Python and saved in `src/nets/`, so
@@ -112,14 +124,33 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   and a face around each vertex. The stellated ones put a pyramid on
   each face of a Platonic solid or the rhombic dodecahedron, or sink one into
   it. Each face gets a 2D
-  coordinate frame. All the solids are star-shaped around their center, which
-  is how a point is put onto the surface.
+  coordinate frame, and a list of the faces across its edges. All the solids
+  but the kaleidocycles are star-shaped around their center, which is how a
+  point is put onto the surface; on a kaleidocycle it goes to the nearest
+  point.
+- `src/kaleidocycles.js` builds the kaleidocycles: rings of tetrahedra whose
+  hinges, opposite edges at right angles, are a quarter turn apart around the
+  ring, alternately one way and the other. As a ring turns, the angles at its
+  hinges take turns between two values, θ and φ, with
+  cos(θ/2) cos(φ/2) = cos(2π/N) for N tetrahedra, which puts it in place at
+  any turn. Each hinge has four faces, two from each tetrahedron, and each
+  face is joined to the face of the other tetrahedron across the gap from it.
+  Around every corner the faces add up to a full turn, so laid flat the
+  surface is a parallelogram of triangles whose opposite sides join up.
 - `src/symmetry.js` finds each solid's full symmetry group, the matrices that
-  take its vertices to its vertices, and the named subgroups it contains.
+  take its vertices to its vertices, and the named subgroups it contains. A
+  kaleidocycle's groups come from its turns about its axis, the quarter of
+  its motion after which it has the same shape again, moved along by one
+  tetrahedron, and the symmetries of its surface laid flat, which are found
+  face by face across the edges.
 - `src/painter.js` keeps the paint in a texture atlas with one cell per face. A
   dab paints where a small ball meets the surface, and is drawn once for every
-  element of the chosen group. Strokes are stored, so the texture can be redrawn
-  for undo and when switching solids. The texture keeps its alpha premultiplied,
+  element of the chosen group. On a kaleidocycle, whose surface lies flat
+  around every corner, dabs and strokes go on the surface laid flat instead,
+  as on its paper: there a hinge's faces are glued in pairs, so paint on one
+  side of a hinge stays off the two faces behind it. Strokes are stored, so the
+  texture can be redrawn for undo and when switching solids, each at the turn a
+  kaleidocycle stood at when it was painted. The texture keeps its alpha premultiplied,
   so the edges of transparent paint blend as cleanly as those of colors. The
   Pick tool reads its color from the texture, not from the rendered scene.
 - `src/fill.js` flood fills the texture atlas, stepping from a face's cell to
@@ -130,7 +161,9 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   edge.
 - `tools/unfold.py` unfolds a solid by growing the net across the edges of
   its faces, leaving out faces that would overlap it or leave no room for a
-  tab, which start further pieces. Every cut edge gets a tab. It tries a few
+  tab, which start further pieces. Every cut edge gets a tab. A kaleidocycle
+  is laid out as a strip instead: its surface lies flat around every corner,
+  so its faces make a patch of a grid of triangles. It tries a few
   orders and keeps the net that comes out largest on the page, with tabs as
   tall as fit, turned and scaled to fill the page, but with edges no longer
   than 50 mm. `tools/build_nets.py` runs it for every solid and

@@ -7,7 +7,7 @@ tools/unfold.py, for all solids or just the ones named:
     .venv/bin/python tools/build_nets.py [solid id ...]
 
 It writes src/nets/<id>.json for each solid, holding the solid's net placed
-on an A4 page for each assembly method. It draws each of those nets as
+on an A4 page for each assembly method it has (kaleidocycles only glue). It draws each of those nets as
 previews/<id>-<assembly>.svg and .pdf, and all of them in previews/nets.pdf.
 With --draw-only, it only draws the saved nets again.
 """
@@ -22,7 +22,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from draw_nets import caption, pdf, svg
-from unfold import ASSEMBLIES, Solid, net_on_page
+from unfold import ASSEMBLIES, Solid, assemblies, net_on_page
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / 'src' / 'nets'
@@ -51,7 +51,7 @@ def draw(solids: list[Solid], chosen: list[Solid]) -> None:
     pages = []
     for solid in solids:
         nets = json.loads((OUT_DIR / f'{solid.id}.json').read_text())
-        for assembly in ASSEMBLIES:
+        for assembly in nets:
             title = caption(solid.name, assembly)
             pages.append((nets[assembly], title))
             if solid.id in drawn:
@@ -59,7 +59,7 @@ def draw(solids: list[Solid], chosen: list[Solid]) -> None:
                 path.with_suffix('.svg').write_text(svg(nets[assembly], title))
                 path.with_suffix('.pdf').write_bytes(pdf([(nets[assembly], title)], title))
     (PREVIEW_DIR / 'nets.pdf').write_bytes(pdf(pages, 'PolyPainter nets'))
-    print(f'Drew {len(chosen) * len(ASSEMBLIES)} nets in {PREVIEW_DIR.relative_to(ROOT)}/, '
+    print(f'Drew {sum(len(assemblies(solid)) for solid in chosen)} nets in {PREVIEW_DIR.relative_to(ROOT)}/, '
           f'and all {len(pages)} in {PREVIEW_DIR.relative_to(ROOT)}/nets.pdf')
 
 
@@ -78,7 +78,7 @@ def main() -> None:
     if not args.draw_only:
         nets: dict[str, dict[str, dict]] = {solid.id: {} for solid in chosen}
         with ProcessPoolExecutor() as pool:
-            jobs = [pool.submit(lay_out, solid, assembly) for solid in chosen for assembly in ASSEMBLIES]
+            jobs = [pool.submit(lay_out, solid, assembly) for solid in chosen for assembly in assemblies(solid)]
             for job in as_completed(jobs):
                 solid_id, assembly, net, pieces, seconds = job.result()
                 nets[solid_id][assembly] = net
@@ -87,7 +87,7 @@ def main() -> None:
 
         OUT_DIR.mkdir(exist_ok=True)
         for solid_id, by_assembly in nets.items():
-            data = {assembly: by_assembly[assembly] for assembly in ASSEMBLIES}
+            data = {assembly: by_assembly[assembly] for assembly in ASSEMBLIES if assembly in by_assembly}
             (OUT_DIR / f'{solid_id}.json').write_text(json.dumps(data, separators=(',', ':')) + '\n')
         print(f'Wrote {len(nets)} files to {OUT_DIR.relative_to(ROOT)}/')
     draw(solids, chosen)

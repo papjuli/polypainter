@@ -21,6 +21,14 @@
     </header>
 
     <aside class="tools" aria-label="Painting tools">
+      <div id="turn-field" class="field" hidden>
+        <label for="turn">Turn</label>
+        <div class="turn">
+          <button id="play-turn" type="button" aria-pressed="false">Play</button>
+          <input id="turn" type="range" min="0" max="1" step="any" value="0" />
+        </div>
+      </div>
+
       <div class="field symmetry">
         <label for="symmetry">Symmetry</label>
         <select id="symmetry" class="dropdown"></select>
@@ -83,7 +91,7 @@
     <dialog id="export-dialog" aria-labelledby="export-title">
       <form id="export-form">
         <h2 id="export-title">Export net</h2>
-        <div class="field">
+        <div id="assembly-field" class="field">
           <label for="assembly-method">Assembly method</label>
           <select id="assembly-method" class="dropdown">
             <option value="glue">Glue tabs</option>
@@ -91,6 +99,7 @@
           </select>
           <!-- <p class="note">Cut the slit at the base of each wide tab. Fold both tabs inward and tuck the matching small rectangular tab through the slit. Tight nets may export as separate pieces.</p> -->
         </div>
+        <p id="glue-only" class="note" hidden>Kaleidocycles come with glue tabs only, so the ring holds together as it turns.</p>
         <label class="checkbox"><input id="export-cutter" type="checkbox" checked /> Include cutter file (DXF)</label>
         <p class="note">A4 print image (PNG) is always included. Print at 100% scale. Solid lines are cuts; dashed lines are folds.</p>
         <p id="export-status" class="note" role="status" aria-live="polite"></p>
@@ -144,6 +153,15 @@
             any stellations, but the icosahedron has 59, which are not included here. Stellations can also be
             created from other polyhedra, not just the Platonic solids: Escher's solid is the first stellation
             of the rhombic dodecahedron, and stands on top of a tower in Escher's print <cite>Waterfall</cite>.
+          </dd>
+          <dt>Kaleidocycles</dt>
+          <dd>
+            Rings of six, eight or ten tetrahedra, each joined to the next by a hinge along one edge, that turn
+            through their own middle without end. As one turns, it shows four different sides, each made of one
+            face from every tetrahedron. Use the Turn slider, or press Play, to turn it, and paint the faces as
+            they come into view. The hexagonal one has Wallace Walker's classic proportions, the longest
+            tetrahedra six can have and still turn: they just touch in the middle on the way round. The larger
+            rings are made of regular tetrahedra.
           </dd>
         </dl>
 
@@ -330,6 +348,33 @@
           mirrors. The snub cube, the snub dodecahedron and their Catalan duals come in left- and
           right-handed forms that are mirror images of each other, so they offer rotations only.
         </p>
+
+        <h4>Kaleidocycles</h4>
+        <p>
+          A kaleidocycle has its own symmetries, which come from the way it turns as much as from its shape.
+          A ring of six tetrahedra looks the same turned a third of the way around its axis, which takes each
+          tetrahedron two places along. But it also takes on the same shape again a quarter of the way through
+          its motion, moved along by one tetrahedron, with different faces in their places. That is how it
+          shows four sides in turn.
+        </p>
+        <dl class="groups">
+          <dt>Around the ring <span>3, 4 or 5 copies</span></dt>
+          <dd>
+            Turns about the ring's axis, which repeat each stroke on every other tetrahedron. The four sides
+            stay separate, so it can show four different pictures, as in Escher's kaleidocycles.
+          </dd>
+          <dt>Every half turn <span>6, 8 or 10 copies</span></dt>
+          <dd>The sides it shows half a turn apart are alike, so it shows two pictures, one after the other.</dd>
+          <dt>Every quarter turn <span>12, 16 or 20 copies</span></dt>
+          <dd>All four sides are alike, so it shows the same picture all the way round.</dd>
+          <dt>Every face <span>24, 32 or 40 copies</span></dt>
+          <dd>
+            Each stroke appears once on every face. Laid flat, the faces make a parallelogram of triangles whose
+            opposite sides join up, and these are all the ways of laying it onto itself without mirroring it.
+          </dd>
+          <dt>Every face, mirrored <span>48, 64 or 80 copies · with mirror images</span></dt>
+          <dd>Every face, with mirror images added.</dd>
+        </dl>
 
         <!-- <h4>What the names mean</h4>
         <p>

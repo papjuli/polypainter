@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { ICOSAHEDRAL, OCTAHEDRAL, PHI, TETRAHEDRAL, isRotation, orbit } from './groups.js';
+import { ringFaces, ringVertices } from './kaleidocycles.js';
 
 const EPSILON = 1e-6;
 
@@ -15,7 +16,8 @@ const BETA = XI * PHI + PHI ** 2 + PHI / XI;
 // are the duals of the Archimedean ones, each named by `dual`. The stellated
 // ones have a pyramid on each face of a `base` solid, with its shortest sides
 // `spike` times the face's edges long, or sunk into it when `spike` is
-// negative.
+// negative. The kaleidocycles are rings of `ring` tetrahedra whose hinges are
+// `hinge` times as long as the distance between them (see kaleidocycles.js).
 const DEFINITIONS = [
   { family: 'Platonic solids', id: 'tetrahedron', name: 'Tetrahedron', group: TETRAHEDRAL, seed: [1, 1, 1] },
   { family: 'Platonic solids', id: 'cube', name: 'Cube', group: OCTAHEDRAL, seed: [1, 1, 1] },
@@ -217,6 +219,23 @@ const DEFINITIONS = [
     base: 'rhombic-dodecahedron',
     spike: 1,
   },
+  // The hinges are 2/√3 times as long as the distance between them, so each
+  // face is as tall as its base and its other sides are √5/2 times as long,
+  // the classic proportions of Wallace Walker's kaleidocycles. That is the
+  // longest a ring of six can have them and still turn: the tetrahedra across
+  // the ring just touch in the middle four times a turn. A ring of six
+  // regular tetrahedra jams.
+  {
+    family: 'Kaleidocycles',
+    id: 'hexagonal-kaleidocycle',
+    name: 'Hexagonal kaleidocycle',
+    ring: 6,
+    hinge: 2 / Math.sqrt(3),
+  },
+  // Rings of eight or more turn with regular tetrahedra, whose opposite edges
+  // are √2 times as long as the distance between them.
+  { family: 'Kaleidocycles', id: 'octagonal-kaleidocycle', name: 'Octagonal kaleidocycle', ring: 8, hinge: Math.SQRT2 },
+  { family: 'Kaleidocycles', id: 'decagonal-kaleidocycle', name: 'Decagonal kaleidocycle', ring: 10, hinge: Math.SQRT2 },
 ];
 
 const centroid = (points) => points.reduce((sum, point) => sum.add(point), new Vector3()).divideScalar(points.length);
@@ -338,6 +357,16 @@ function shape(definition, built) {
   return { vertices: orbit(definition.group, definition.seed) };
 }
 
+// Which face lies across each edge of each face, as [face, edge], where edge
+// i runs from the face's vertex i to the next. Faces list their vertices
+// counter-clockwise from outside, so the face across an edge runs along it
+// the other way.
+function findAdjacent(faces) {
+  const along = new Map();
+  faces.forEach((face, f) => face.forEach((a, i) => along.set(`${a}-${face[(i + 1) % face.length]}`, [f, i])));
+  return faces.map((face) => face.map((a, i) => along.get(`${face[(i + 1) % face.length]}-${a}`)));
+}
+
 function findEdges(faces) {
   const edges = new Map();
   for (const face of faces) {
@@ -364,8 +393,14 @@ function faceFrame(face, vertices) {
   return { center, normal, offset: normal.dot(center), right, up };
 }
 
+// How finely a kaleidocycle's motion is sampled to find how far out its
+// corners reach. A quarter turn later it has the same shape, turned about its
+// axis, so a quarter turn is enough.
+const RING_SAMPLES = 64;
+
 function buildPolyhedron(definition, built) {
   const { family, id, name } = definition;
+  if (definition.ring) return buildKaleidocycle(definition);
   let { vertices, faces } = shape(definition, built);
   faces ??= findFaces(vertices);
   // Scale every solid to have its farthest vertices at a distance of 1, so they
@@ -374,7 +409,61 @@ function buildPolyhedron(definition, built) {
   vertices = vertices.map((v) => v.clone().divideScalar(radius));
   const edges = findEdges(faces);
   const faceFrames = faces.map((face) => faceFrame(face, vertices));
-  return { family, id, name, vertices, faces, edges, faceFrames };
+  const adjacent = findAdjacent(faces);
+  return { family, id, name, vertices, faces, edges, faceFrames, adjacent, starShaped: true };
+}
+
+// A kaleidocycle as it stands at turn 0, where all its hinges are alike, and
+// `ring`, which atTurn() uses to turn it. Its faces don't depend on the turn,
+// since the tetrahedra only move as a whole, but its vertices and face frames
+// do. It is a ring, so it isn't star-shaped around its center. Like the other
+// solids, it is scaled so its corners reach out to a distance of 1, as far as
+// they ever do as it turns.
+function buildKaleidocycle({ family, id, name, ring: count, hinge }) {
+  let radius = 0;
+  for (let k = 0; k < RING_SAMPLES; k++) {
+    for (const vertex of ringVertices(count, hinge, k / RING_SAMPLES / 4)) radius = Math.max(radius, vertex.length());
+  }
+  const vertices = ringVertices(count, hinge, 0).map((v) => v.divideScalar(radius));
+  const { faces, adjacent } = ringFaces(count, vertices);
+  const edges = findEdges(faces);
+  const faceFrames = faces.map((face) => faceFrame(face, vertices));
+  return {
+    family,
+    id,
+    name,
+    vertices,
+    faces,
+    edges,
+    faceFrames,
+    adjacent,
+    starShaped: false,
+    ring: { count, hinge, radius },
+  };
+}
+
+// Kaleidocycles turned some way, by solid and turn, as atTurn() last made
+// them. Redrawing a painting replays its strokes, each at the turn it was
+// painted at, so this keeps more than one.
+const turned = new WeakMap();
+const TURNED_KEPT = 32;
+
+// A solid `turn` of the way around its motion, from 0 to 1, with the same
+// faces and face indices, but its vertices and face frames moved. The face
+// coordinates of a point on a face don't change as it turns. Solids that don't
+// turn stay as they are.
+export function atTurn(polyhedron, turn) {
+  if (!polyhedron.ring || !turn) return polyhedron;
+  if (!turned.has(polyhedron)) turned.set(polyhedron, new Map());
+  const cache = turned.get(polyhedron);
+  if (!cache.has(turn)) {
+    const { count, hinge, radius } = polyhedron.ring;
+    const vertices = ringVertices(count, hinge, turn).map((v) => v.divideScalar(radius));
+    const faceFrames = polyhedron.faces.map((face) => faceFrame(face, vertices));
+    if (cache.size >= TURNED_KEPT) cache.delete(cache.keys().next().value);
+    cache.set(turn, { ...polyhedron, vertices, faceFrames });
+  }
+  return cache.get(turn);
 }
 
 export const POLYHEDRA = DEFINITIONS.reduce(
@@ -413,12 +502,55 @@ function exit({ vertices, faces, faceFrames }, point) {
   return best;
 }
 
-// The face that a point on the solid lies on.
-export function faceAt(polyhedron, point) {
-  return exit(polyhedron, point).face;
+// The point on the solid nearest to a point, and the face it is on, for
+// solids that aren't star-shaped. Of faces equally near, as at an edge, the
+// one the point is furthest inside of wins.
+function nearest({ vertices, faces, faceFrames }, point) {
+  let best = { face: 0, point, distanceSq: Infinity, inside: -Infinity };
+  const [along, toPoint, closest] = [new Vector3(), new Vector3(), new Vector3()];
+  faceFrames.forEach(({ normal, offset }, f) => {
+    const projected = point.clone().addScaledVector(normal, offset - normal.dot(point));
+    // How far inside the face's edges the point's projection onto its plane
+    // is, and the nearest point on its outline in case that is outside.
+    let inside = Infinity;
+    let edgePoint = null;
+    let edgeDistanceSq = Infinity;
+    faces[f].forEach((a, i) => {
+      const [start, end] = [vertices[a], vertices[faces[f][(i + 1) % faces[f].length]]];
+      along.subVectors(end, start);
+      toPoint.subVectors(projected, start);
+      inside = Math.min(inside, along.clone().cross(toPoint).dot(normal) / along.length());
+      const t = Math.min(Math.max(toPoint.dot(along) / along.lengthSq(), 0), 1);
+      closest.copy(start).addScaledVector(along, t);
+      if (closest.distanceToSquared(point) < edgeDistanceSq) {
+        edgeDistanceSq = closest.distanceToSquared(point);
+        edgePoint = closest.clone();
+      }
+    });
+    const onFace = inside >= 0 ? projected : edgePoint;
+    const distanceSq = onFace.distanceToSquared(point);
+    if (distanceSq < best.distanceSq - 1e-12 || (distanceSq < best.distanceSq + 1e-12 && inside > best.inside)) {
+      best = { face: f, point: onFace, distanceSq, inside };
+    }
+  });
+  return best;
 }
 
-// Moves a point near the solid along the ray from its center onto its surface.
+const locate = (polyhedron, point) => (polyhedron.starShaped ? exit : nearest)(polyhedron, point);
+
+// The face that a point on the solid lies on.
+export function faceAt(polyhedron, point) {
+  return locate(polyhedron, point).face;
+}
+
+// Moves a point near the solid onto its surface: along the ray from its center
+// on solids star-shaped around it, or else to the nearest point on it.
 export function projectToSurface(polyhedron, point) {
-  return exit(polyhedron, point).point;
+  return locate(polyhedron, point).point;
+}
+
+// The same point, with the face it lands on.
+export function surfacePoint(polyhedron, point) {
+  const { face, point: onSurface } = locate(polyhedron, point);
+  return { face, point: onSurface };
 }

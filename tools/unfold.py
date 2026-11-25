@@ -6,8 +6,8 @@ which draws them with the painting and writes the cutter file.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from math import atan2, cos, fmod, hypot, inf, pi, sin, tan
+from dataclasses import dataclass, field
+from math import atan2, cos, floor, fmod, hypot, inf, pi, sin, tan
 from typing import Any, Callable, NamedTuple
 
 Point = tuple[float, float]
@@ -274,32 +274,45 @@ def seeded_random(seed: int) -> Callable[[], float]:
     return random
 
 
+# An edge of a face, as the face and the index of the edge's first corner.
+Side = tuple[int, int]
+
+
 @dataclass
 class Solid:
     """A solid's name, its faces, as vertex indices counter-clockwise from
-    outside, and their corners in each face's own 2D coordinates."""
+    outside, their corners in each face's own 2D coordinates, and the side of
+    the face across each edge of each face. That side runs along the edge the
+    other way. A kaleidocycle's hinges have four faces each, so two faces can
+    share an edge with the same two vertices as two others. For a kaleidocycle,
+    `ring` is how many tetrahedra it has."""
 
     id: str
     name: str
     faces: list[list[int]]
     corners: list[Polygon]
+    adjacent: list[list[Side]]
+    ring: int | None = None
 
     @classmethod
     def from_json(cls, data: dict) -> Solid:
         corners = [[(float(x), float(y)) for x, y in face] for face in data['corners']]
-        return cls(data['id'], data['name'], data['faces'], corners)
+        adjacent = [[(g, j) for g, j in face] for face in data['adjacent']]
+        return cls(data['id'], data['name'], data['faces'], corners, adjacent, data.get('ring'))
 
 
 @dataclass
 class Unfolded:
     """A solid unfolded into pieces, as lists of faces, with each face's
     placement, mapping its face coordinates into the net, its corners there, and
-    the edges the net folds along, both ways round."""
+    the edges the net folds along, as the sides on both faces. Of the edges cut,
+    those with a side in `tab_sides` have their tab there if it fits."""
 
     pieces: list[list[int]]
     placements: list[Transform]
     polygons: list[Polygon]
-    folds: set[tuple[int, int]]
+    folds: set[Side]
+    tab_sides: set[Side] = field(default_factory=set)
 
 
 @dataclass
@@ -347,12 +360,16 @@ def rounded(value: Any) -> Any:
     return value
 
 
+def same_point(p: Point, q: Point) -> bool:
+    return hypot(p[0] - q[0], p[1] - q[1]) < EPSILON
+
+
 def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str) -> Unfolded:
     """Unfolds a solid into pieces of net, growing each breadth first across the
     edges of its faces and leaving out faces that would overlap it. Faces left
     out start more pieces. Takes the faces in their own order, or in an order
     shuffled by `random` when given."""
-    faces, corners = solid.faces, solid.corners
+    faces, corners, adjacent = solid.faces, solid.corners, solid.adjacent
 
     def shuffle(items: list) -> list:
         if random is None:
@@ -365,27 +382,22 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
         face = faces[f]
         return [(i, a, face[(i + 1) % len(face)]) for i, a in enumerate(face)]
 
-    # Faces list their vertices counter-clockwise from outside, so the face
-    # across an edge runs along it the other way.
-    face_along = {(a, b): f for f in range(len(faces)) for _, a, b in edges_of(f)}
-
     pieces: list[list[int]] = []
     # Of the faces placed so far.
     placements: dict[int, Transform] = {}
     polygons: dict[int, Polygon] = {}
     boxes: dict[int, Box] = {}
-    folds: set[tuple[int, int]] = set()
+    folds: set[Side] = set()
 
     def seams_have_room(piece: list[int], g: int, shape: Polygon, joining: int) -> bool:
         # Placing a face may close seams with faces already in the piece,
         # leaving each seam's two edges side by side in a slot. Around a corner
         # whose faces' angles add up to nearly a full turn, the slot is too
         # narrow for a glue tab on either side.
-        for k, a, b in edges_of(g):
-            h = face_along[(b, a)]
+        for k, _, _ in edges_of(g):
+            h, m = adjacent[g][k]
             if k == joining or h not in piece:
                 continue
-            m = faces[h].index(b)
             sides = [
                 (shape[k], shape[(k + 1) % len(shape)]),
                 (polygons[h][m], polygons[h][(m + 1) % len(faces[h])]),
@@ -402,8 +414,7 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
         # either tab on every edge of the face not folded or being joined.
         found = [shape]
         for k, p in enumerate(shape):
-            a, b = faces[h][k], faces[h][(k + 1) % len(faces[h])]
-            if k == joining or (a, b) in folds:
+            if k == joining or (h, k) in folds:
                 continue
             found.append(tab(p, shape[(k + 1) % len(shape)], TAB_ANGLES[0]))
         return found
@@ -419,10 +430,9 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
             f = piece[k]
             k += 1
             for i, a, b in shuffle(edges_of(f)):
-                g = face_along[(b, a)]
+                g, j = adjacent[f][i]
                 if g in placements:
                     continue
-                j = faces[g].index(b)
                 placement = rigid_map(
                     corners[g][(j + 1) % len(faces[g])],
                     corners[g][j],
@@ -447,11 +457,83 @@ def grow_pieces(solid: Solid, random: Callable[[], float] | None, assembly: str)
                     ):
                         continue
                 placements[g], polygons[g], boxes[g] = placement, polygon, bounds(polygon)
-                folds.update(((a, b), (b, a)))
+                folds.update(((f, i), (g, j)))
                 piece.append(g)
         pieces.append(piece)
     every = range(len(faces))
     return Unfolded(pieces, [placements[f] for f in every], [polygons[f] for f in every], folds)
+
+
+def strip(solid: Solid) -> Unfolded:
+    """Lays a kaleidocycle out the way it is usually made: as a strip of its
+    triangles, with each tetrahedron's four faces in a row, joined around the
+    tetrahedron, and the rows one above another along the ring, joined at the
+    hinges between them. Its corners all lie flat, so the strip is a patch of a
+    grid of triangles, with the hinges across it. Rolled into a tube, the ends
+    of each row meet, and then the ends of the tube close the ring.
+
+    Each row's triangles are those centered from a quarter of a hinge to two
+    and a quarter hinges along it. That makes the strip's ends straight, two
+    hinges long, and its sides zigzag, half a hinge apart. The tabs go down
+    the right side and along the top."""
+    count = solid.ring
+    faces, corners, adjacent = solid.faces, solid.corners, solid.adjacent
+    every = range(len(faces))
+
+    def tetrahedron(f: int) -> int:
+        # The faces come tetrahedron by tetrahedron, four each, with their
+        # hinge as their first edge.
+        return f // 4
+
+    # The first face has its hinge along the bottom.
+    start, end = corners[0][0], corners[0][1]
+    hinge = hypot(end[0] - start[0], end[1] - start[1])
+    placements = {0: rigid_map(start, end, (0.0, 0.0), (hinge, 0.0))}
+    queue = [0]
+    k = 0
+    while k < len(queue):
+        f = queue[k]
+        k += 1
+        here = [apply(placements[f], p) for p in corners[f]]
+        for i in range(len(faces[f])):
+            g, j = adjacent[f][i]
+            # The ring is cut open at the first tetrahedron's first hinge.
+            if g in placements or (i == 0 and {tetrahedron(f), tetrahedron(g)} == {0, count - 1}):
+                continue
+            n = len(faces[g])
+            placements[g] = rigid_map(corners[g][(j + 1) % n], corners[g][j], here[i], here[(i + 1) % len(here)])
+            queue.append(g)
+
+    # Going around a tetrahedron, across its four faces, comes back two
+    # hinges further along the row, so faces move along by that much to land
+    # in the strip.
+    around = 2 * hinge
+    for f in every:
+        center = sum(apply(placements[f], p)[0] for p in corners[f]) / len(corners[f])
+        move = -around * floor((center - hinge / 4) / around)
+        placements[f] = compose(Transform(1.0, 0.0, 0.0, 1.0, move, 0.0), placements[f])
+    polygons = [[apply(placements[f], p) for p in corners[f]] for f in every]
+    for f in every:
+        if any(overlaps(polygons[f], polygons[g]) for g in range(f + 1, len(faces))):
+            raise RuntimeError(f'The strip of the {solid.id} overlaps itself.')
+
+    def ends(side: Side) -> tuple[Point, Point]:
+        f, i = side
+        return polygons[f][i], polygons[f][(i + 1) % len(faces[f])]
+
+    # The strip folds wherever the two sides of an edge lie along each other.
+    folds: set[Side] = set()
+    tab_sides: set[Side] = set()
+    for f in every:
+        for i in range(len(faces[f])):
+            (p, q), (r, s) = ends((f, i)), ends(adjacent[f][i])
+            if same_point(p, s) and same_point(q, r):
+                folds.add((f, i))
+            # Of the two sides of a hinge left to glue, the top one gets the
+            # tab, and of the two sides of another edge, the right one.
+            elif (p[1] + q[1] > r[1] + s[1]) if i == 0 else (p[0] + q[0] > r[0] + s[0]):
+                tab_sides.add((f, i))
+    return Unfolded([list(every)], [placements[f] for f in every], polygons, folds, tab_sides)
 
 
 def pack_pieces(unfolded: Unfolded) -> Unfolded:
@@ -535,7 +617,6 @@ def finish_net(solid: Solid, unfolded: Unfolded, assembly: str) -> Net | None:
     def segment(f: int, i: int) -> Polygon:
         return [polygons[f][i], polygons[f][(i + 1) % len(faces[f])]]
 
-    face_along = {(a, face[(i + 1) % len(face)]): f for f, face in enumerate(faces) for i, a in enumerate(face)}
     folds: list[Polygon] = []
     cuts: list[Polygon] = []
     slits: list[Polygon] = []
@@ -552,13 +633,16 @@ def finish_net(solid: Solid, unfolded: Unfolded, assembly: str) -> Net | None:
             # Takes each edge once, from the face that has it going up.
             if a > b:
                 continue
-            if (a, b) in unfolded.folds:
+            if (f, i) in unfolded.folds:
                 folds.append(segment(f, i))
                 continue
             # A cut edge is on the outline twice; it gets the largest tab that is
-            # clear of the rest of the net on either side.
-            g = face_along[(b, a)]
-            sides = [segment(f, i), segment(g, faces[g].index(b))]
+            # clear of the rest of the net on either side, the side the
+            # unfolding prefers first.
+            g, j = solid.adjacent[f][i]
+            sides = [segment(f, i), segment(g, j)]
+            if (g, j) in unfolded.tab_sides:
+                sides.reverse()
             if assembly == 'interlocking':
                 connector = None
                 for angles in TAB_ANGLES:
@@ -721,17 +805,29 @@ def place_on_page(net: Net, max_scale: float = inf) -> Net:
     )
 
 
+def assemblies(solid: Solid) -> tuple[str, ...]:
+    """The ways a solid's nets can be put together. A kaleidocycle has only glue
+    tabs: turning it pulls on its seams, and tabs only tucked in would come
+    apart."""
+    return ('glue',) if solid.ring else ASSEMBLIES
+
+
 def net_on_page(solid: Solid, assembly: str = 'glue') -> Net:
     """Unfolds a solid and places it on the page, picking the net that comes out
     largest there, and shrinking it if its edges come out longer than
-    MAX_EDGE."""
-    if assembly not in ASSEMBLIES:
-        raise ValueError(f'Unknown assembly method: {assembly}')
+    MAX_EDGE. A kaleidocycle is laid out as a strip instead."""
+    if assembly not in assemblies(solid):
+        raise ValueError(f'No {assembly} net for the {solid.id}')
+    if solid.ring:
+        net = finish_net(solid, pack_pieces(strip(solid)), assembly)
+        if not net:
+            raise RuntimeError(f'Could not make room for every tab on the {solid.id}.')
+        nets = [net]
+    else:
+        nets = unfold(solid, assembly)
     # The first of the largest. Of nets that would all come out too large, this
     # keeps the one with the most room to spare.
-    best_placed, best = max(
-        ((place_on_page(net), net) for net in unfold(solid, assembly)), key=lambda pair: pair[0].scale
-    )
+    best_placed, best = max(((place_on_page(net), net) for net in nets), key=lambda pair: pair[0].scale)
     longest = max(
         hypot(qx - px, qy - py) for face in solid.corners for (px, py), (qx, qy) in zip(face, face[1:] + face[:1])
     )

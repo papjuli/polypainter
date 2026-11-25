@@ -5,7 +5,7 @@ import { modelFile } from './model.js';
 import { PIXELS_PER_MM, drawNet, findHoles } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
 import { setPixelsPerMeter } from './png.js';
-import { POLYHEDRA, faceAt } from './polyhedra.js';
+import { POLYHEDRA, atTurn, faceAt, toFaceCoordinates } from './polyhedra.js';
 import { symmetryGroups } from './symmetry.js';
 import './style.css';
 
@@ -22,6 +22,9 @@ const FILL_CURSOR_RADIUS = 0.02;
 // Brightness of the solid's inside, which shows through transparent paint,
 // relative to its outside.
 const INSIDE_BRIGHTNESS = 0.6;
+// Seconds a kaleidocycle takes to turn all the way round when played, showing
+// each of its four sides for a quarter of that.
+const TURN_PERIOD = 12;
 
 const viewport = document.getElementById('viewport');
 const tools = document.querySelector('.tools');
@@ -31,6 +34,9 @@ const hint = document.getElementById('hint');
 const resetButton = document.getElementById('reset-view');
 const symmetrySelect = document.getElementById('symmetry');
 const symmetryNote = document.getElementById('symmetry-note');
+const turnField = document.getElementById('turn-field');
+const turnSlider = document.getElementById('turn');
+const playButton = document.getElementById('play-turn');
 const toolPicker = document.getElementById('tool-picker');
 const swatches = document.getElementById('swatches');
 const transparentSwatch = document.getElementById('transparent-color');
@@ -107,35 +113,53 @@ faceMaterial.onBeforeCompile = (shader) => {
 };
 const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1d1d1f, transparent: true, opacity: 0.35 });
 
+// The solid's mesh and edge lines, and `place`, which moves their corners to
+// new vertices, as a kaleidocycle turns. The texture coordinates stay put,
+// since a face's coordinates don't change as it moves.
 function createSolid(polyhedron, layout) {
   const { vertices, faces, edges } = polyhedron;
 
   // Each polygonal face is split into a triangle fan from its first vertex.
-  const facePositions = [];
+  const corners = [];
   const faceUVs = [];
   faces.forEach((face, f) => {
     for (let i = 1; i < face.length - 1; i++) {
       for (const index of [face[0], face[i], face[i + 1]]) {
-        facePositions.push(...vertices[index].toArray());
+        corners.push(index);
         faceUVs.push(...layout.uv(f, vertices[index]));
       }
     }
   });
   const faceGeometry = new THREE.BufferGeometry();
-  faceGeometry.setAttribute('position', new THREE.Float32BufferAttribute(facePositions, 3));
+  faceGeometry.setAttribute('position', new THREE.Float32BufferAttribute(corners.length * 3, 3));
   faceGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(faceUVs, 2));
-  faceGeometry.computeVertexNormals();
 
-  const edgePositions = edges.flatMap(([a, b]) => [...vertices[a].toArray(), ...vertices[b].toArray()]);
   const edgeGeometry = new THREE.BufferGeometry();
-  edgeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(edgePositions, 3));
+  edgeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(edges.length * 6, 3));
+
+  function place(vertices) {
+    const facePositions = faceGeometry.getAttribute('position');
+    corners.forEach((index, k) => facePositions.setXYZ(k, ...vertices[index].toArray()));
+    facePositions.needsUpdate = true;
+    faceGeometry.computeVertexNormals();
+    // The raycaster skips meshes whose bounds the pointer misses.
+    faceGeometry.computeBoundingSphere();
+    const edgePositions = edgeGeometry.getAttribute('position');
+    edges.forEach(([a, b], k) => {
+      edgePositions.setXYZ(2 * k, ...vertices[a].toArray());
+      edgePositions.setXYZ(2 * k + 1, ...vertices[b].toArray());
+    });
+    edgePositions.needsUpdate = true;
+    edgeGeometry.computeBoundingSphere();
+  }
+  place(vertices);
 
   const mesh = new THREE.Mesh(faceGeometry, faceMaterial);
   const edgeLines = new THREE.LineSegments(edgeGeometry, edgeMaterial);
   const object = new THREE.Group();
   object.add(mesh, edgeLines);
   object.visible = false;
-  return { object, mesh, edgeLines };
+  return { object, mesh, edgeLines, place };
 }
 
 const painter = new Painter(renderer);
@@ -152,9 +176,11 @@ for (const polyhedron of POLYHEDRA.values()) {
       groups,
       // Like Escher's designs, repeat by all of the solid's rotations unless
       // asked otherwise.
-      group: groups.filter((group) => !group.reflections).at(-1),
+      group: groups.find((group) => group.preferred),
       history: [],
       redoStack: [],
+      // How far a kaleidocycle has turned, from 0 to 1. Other solids stay at 0.
+      turn: 0,
     },
   };
   solids.set(polyhedron.id, solid);
@@ -195,13 +221,22 @@ const cursorTransform = new THREE.Matrix4();
 const cursorRotation = new THREE.Quaternion();
 const cursorScale = new THREE.Vector3();
 
+// Each copy goes where its symmetry takes the point's face coordinates. Not
+// all of a kaleidocycle's symmetries are motions of it in space.
 function showCursor(point) {
-  const { polyhedron, group } = current.painting;
-  const face = faceAt(polyhedron, point);
+  const { group } = current.painting;
+  const surface = painter.surface();
+  const face = faceAt(surface, point);
+  const [x, y] = toFaceCoordinates(surface.faceFrames[face], point);
   cursorScale.setScalar(tool === 'fill' ? FILL_CURSOR_RADIUS : brushRadius());
-  group.elements.forEach(({ matrix, faceMaps }, i) => {
-    const normal = polyhedron.faceFrames[faceMaps[face].face].normal;
-    const position = point.clone().applyMatrix3(matrix).addScaledVector(normal, 0.002);
+  group.elements.forEach(({ faceMaps }, i) => {
+    const { face: image, xx, xy, yx, yy } = faceMaps[face];
+    const { center, right, up, normal } = surface.faceFrames[image];
+    const position = center
+      .clone()
+      .addScaledVector(right, xx * x + xy * y)
+      .addScaledVector(up, yx * x + yy * y)
+      .addScaledVector(normal, 0.002);
     cursorRotation.setFromUnitVectors(Z_AXIS, normal);
     cursorTransform.compose(position, cursorRotation, cursorScale);
     cursor.setMatrixAt(i, cursorTransform);
@@ -230,13 +265,51 @@ function select(id) {
   faceMaterial.needsUpdate = true;
 
   const { groups, group } = current.painting;
-  symmetrySelect.replaceChildren(
-    ...groups.map((g) => new Option(g.order === 1 ? g.name : `${g.name} (${g.id})`, g.id, false, g === group)),
-  );
+  symmetrySelect.replaceChildren(...groups.map((g) => new Option(g.label, g.id, false, g === group)));
   describeSymmetry();
+  turnField.hidden = !polyhedron.ring;
+  setPlaying(false);
+  showTurn();
   updateHistoryButtons();
   hideCursor();
 }
+
+// Moves the current solid to its painting's turn.
+function showTurn() {
+  const { polyhedron, turn } = current.painting;
+  current.place(atTurn(polyhedron, turn).vertices);
+  turnSlider.value = turn;
+}
+
+let playing = false;
+let lastFrame = null;
+
+function setPlaying(play) {
+  playing = play;
+  lastFrame = null;
+  playButton.textContent = play ? 'Pause' : 'Play';
+  playButton.setAttribute('aria-pressed', String(play));
+}
+
+// Turns the kaleidocycle on by the time since the last frame.
+function playTurn(time) {
+  if (lastFrame !== null) {
+    const painting = current.painting;
+    painting.turn = (painting.turn + (time - lastFrame) / 1000 / TURN_PERIOD) % 1;
+    showTurn();
+    // The rings would stay where the brush was before the solid moved.
+    hideCursor();
+  }
+  lastFrame = time;
+}
+
+playButton.addEventListener('click', () => setPlaying(!playing));
+turnSlider.addEventListener('input', () => {
+  setPlaying(false);
+  current.painting.turn = Number(turnSlider.value);
+  showTurn();
+  hideCursor();
+});
 
 function describeSymmetry() {
   const { group } = current.painting;
@@ -467,6 +540,10 @@ async function loadNet(id, assembly) {
 let exporting = false;
 exportButton.addEventListener('click', () => {
   exportStatus.textContent = '';
+  // Kaleidocycles only have glue nets.
+  const glueOnly = Boolean(current.painting.polyhedron.ring);
+  document.getElementById('assembly-field').hidden = glueOnly;
+  document.getElementById('glue-only').hidden = !glueOnly;
   exportDialog.showModal();
 });
 document.getElementById('export-cancel').addEventListener('click', () => exportDialog.close());
@@ -483,9 +560,9 @@ document.addEventListener('keydown', (event) => {
 exportForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (exporting) return;
-  const assembly = document.getElementById('assembly-method').value;
-  const includeCutter = document.getElementById('export-cutter').checked;
   const { polyhedron, layout } = current.painting;
+  const assembly = polyhedron.ring ? 'glue' : document.getElementById('assembly-method').value;
+  const includeCutter = document.getElementById('export-cutter').checked;
   exporting = true;
   const inputs = [...exportForm.querySelectorAll('button, select, input')];
   inputs.forEach((input) => { input.disabled = true; });
@@ -525,12 +602,13 @@ exportModelButton.addEventListener('click', async () => {
     await afterNextPaint();
     // Read together, before anything else can run, so the texture matches
     // the solid even if the user switches solids during the export.
-    const { polyhedron, layout } = current.painting;
+    // A kaleidocycle is exported as it stands now.
+    const { polyhedron, layout, turn } = current.painting;
     const atlas = painter.toCanvas();
     const hasHoles = painter.hasTransparentPaint;
     const png = await new Promise((resolve) => atlas.toBlob(resolve));
     if (!png) throw new Error('Could not create the texture image.');
-    const glb = modelFile(polyhedron, layout, new Uint8Array(await png.arrayBuffer()), {
+    const glb = modelFile(atTurn(polyhedron, turn), layout, new Uint8Array(await png.arrayBuffer()), {
       roughness: faceMaterial.roughness,
       metalness: faceMaterial.metalness,
       alphaCutoff: hasHoles ? faceMaterial.alphaTest : null,
@@ -586,6 +664,9 @@ viewport.addEventListener(
       pickColor(point);
       return;
     }
+    // A stroke is painted on the solid as it stands, so a kaleidocycle stops
+    // turning to be painted.
+    setPlaying(false);
     if (tool === 'fill') {
       runCommand(() => painter.bucketFill(point, { group: current.painting.group, color: brushColor }));
       rememberColor(customBrushColor());
@@ -667,7 +748,8 @@ showRecentColors();
 setTool('paint');
 select('cube');
 
-renderer.setAnimationLoop(() => {
+renderer.setAnimationLoop((time) => {
+  if (playing) playTurn(time);
   controls.update();
   painter.flush();
   renderer.render(scene, camera);

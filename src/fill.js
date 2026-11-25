@@ -43,7 +43,7 @@ function rigidMap([ax, ay], [bx, by], [Ax, Ay], [Bx, By]) {
 // Each face's pixels in the atlas, as a span per row of the pixels whose
 // centers lie in the face, and its edges, with a map taking atlas positions
 // beyond an edge to the face across it, unfolded flat.
-function faceRegions({ vertices, faces, faceFrames }, layout) {
+function faceRegions({ vertices, faces, faceFrames, adjacent }, layout) {
   const outlines = faces.map((face, f) => {
     const { originX, originY } = layout.cells[f];
     return face.map((i) => {
@@ -51,11 +51,6 @@ function faceRegions({ vertices, faces, faceFrames }, layout) {
       return [originX + x * layout.density, originY + y * layout.density];
     });
   });
-  // Faces list their vertices counter-clockwise from outside, so the face
-  // across an edge runs along it the other way.
-  const edgeAlong = new Map();
-  faces.forEach((face, f) => face.forEach((a, i) => edgeAlong.set(`${a}-${face[(i + 1) % face.length]}`, [f, i])));
-
   return outlines.map((outline, f) => {
     const n = outline.length;
     // The pixels in row v whose centers lie in the face, as [start, end).
@@ -95,9 +90,10 @@ function faceRegions({ vertices, faces, faceFrames }, layout) {
       ends[k] = Math.max(end, start + 1);
     }
 
-    const edges = faces[f].map((a, i) => {
-      const b = faces[f][(i + 1) % n];
-      const [g, j] = edgeAlong.get(`${b}-${a}`);
+    // The face across each edge runs along it the other way, from its corner
+    // j + 1 to its corner j.
+    const edges = faces[f].map((_, i) => {
+      const [g, j] = adjacent[f][i];
       const [[ax, ay], [bx, by]] = [outline[i], outline[(i + 1) % n]];
       const length = Math.hypot(bx - ax, by - ay);
       const normal = [(by - ay) / length, (ax - bx) / length];

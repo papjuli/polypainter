@@ -256,6 +256,24 @@ input:focus-visible {
   gap: 6px;
 }
 
+/* The flex layout would otherwise override the hidden attribute, which keeps
+   the Turn control out of the way on solids that don't turn. */
+.field[hidden] {
+  display: none;
+}
+
+.turn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#play-turn {
+  min-width: 68px;
+  background: var(--control);
+  border-color: var(--border);
+}
+
 .field > label,
 .field > .label {
   font-size: 12px;
@@ -559,6 +577,10 @@ input[type='range'] {
 #export-dialog .note,
 #export-dialog .field > label {
   display: block;
+}
+
+#export-dialog .note[hidden] {
+  display: none;
 }
 
 #export-dialog .note {

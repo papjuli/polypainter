@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { floodFill } from './fill.js';
-import { faceAt, projectToSurface, toFaceCoordinates } from './polyhedra.js';
+import { atTurn, faceAt, surfacePoint, toFaceCoordinates } from './polyhedra.js';
 
 // The paint lives in a texture atlas with one cell per face.
 const TEXELS_PER_UNIT = 640;
@@ -77,6 +77,193 @@ export function createAtlasLayout({ vertices, faces, faceFrames }, maxTextureSiz
       return [(originX + x * density) / width, (originY + y * density) / height];
     },
   };
+}
+
+// Where a dab of `radius` around a point on a solid, on face `face`, paints:
+// a disc on each face it reaches, as the disc's center in the face's
+// coordinates and its radius. `margin` is how far a face's cell reaches past
+// its edges, in world units.
+//
+// A dab paints where a ball around the point meets the surface, so it
+// carries on across edges and corners. On each face plane the ball cuts,
+// that is a disc around the point's projection onto the plane. On solids
+// that aren't convex, the point can be in front of a face's plane as well
+// as behind it. Kaleidocycles are painted differently, below.
+export function dabFootprint(surface, point, face, radius, margin) {
+  if (surface.ring) return flatFootprint(surface, point, face, radius, margin);
+  const footprint = [];
+  surface.faceFrames.forEach((frame, f) => {
+    const depth = Math.abs(frame.offset - frame.normal.dot(point));
+    if (depth >= radius) return;
+    const [x, y] = toFaceCoordinates(frame, point);
+    footprint.push({ face: f, x, y, radius: Math.sqrt(radius * radius - depth * depth) });
+  });
+  return footprint;
+}
+
+// The dabs of a stroke from a dab, on face `face`, toward a point further
+// along it, `spacing` apart, each with the face it is on. Null if the stroke
+// shouldn't be joined up to the point, as below.
+//
+// On most solids, dabs go along the chord to the point, pushed back out onto
+// the surface, so a stroke crossing an edge follows the surface around it.
+// Kaleidocycles are painted differently, below.
+export function strokeDabs(surface, from, face, to, spacing) {
+  if (surface.ring) return flatStrokeDabs(surface, from, face, to, spacing);
+  const distance = from.distanceTo(to);
+  const dabs = [];
+  for (let travelled = spacing; travelled <= distance; travelled += spacing) {
+    dabs.push(surfacePoint(surface, from.clone().lerp(to, travelled / distance)));
+  }
+  return dabs;
+}
+
+// A kaleidocycle's surface lies flat around every corner, so it is painted
+// laid flat, as on the paper it is printed on, and the paint is the same at
+// every turn. Laid flat, faces join up along the edges they are glued along,
+// which isn't how they meet in space. At a hinge, a face is glued to the
+// other tetrahedron's face on the same side; the two faces behind the hinge
+// are right there in space, but far away on the surface. So are the faces of
+// tetrahedra across the ring, where the hexagonal ring's touch.
+//
+// A dab is a disc on the surface laid flat, starting on the point's face and
+// carrying on across each edge it comes near into the face glued there. A
+// disc that only reaches the margin past an edge still carries on across it,
+// so texture filtering at the edge finds the paint just across it.
+function flatFootprint(surface, point, face, radius, margin) {
+  const center = toFaceCoordinates(surface.faceFrames[face], point);
+  return [...layFlat(surface, face, center, radius + margin)].map(([f, motion]) => {
+    const [x, y] = move(motion, center);
+    return { face: f, x, y, radius };
+  });
+}
+
+// A stroke goes in a straight line on the surface laid flat. Going by the
+// chord instead, a stroke along a hinge, from one side of it to the other,
+// would cut under it where the faces in front of it make a ridge, and come
+// out on the faces behind it.
+//
+// The surface has no edge, so there is always a way there, but when it is
+// much longer than the way through space, as when the pointer goes over the
+// outline of one tetrahedron onto one behind it, the stroke doesn't join up.
+// Nor does it past half a hinge's length: the way around a tetrahedron is
+// twice as long as a hinge, and laid flat further than that, the surface
+// would overlap itself.
+function flatStrokeDabs(surface, from, face, to, spacing) {
+  const { faceFrames } = surface;
+  const corners = cornersOf(surface);
+  const start = toFaceCoordinates(faceFrames[face], from);
+  const [hingeStart, hingeEnd] = corners[0];
+  const hinge = Math.hypot(hingeEnd[0] - hingeStart[0], hingeEnd[1] - hingeStart[1]);
+  const reach = Math.min(FLAT_STROKE_REACH * from.distanceTo(to) + spacing, hinge / 2);
+  const laid = layFlat(surface, face, start, reach);
+  const toFace = faceAt(surface, to);
+  if (!laid.has(toFace)) return null;
+  const end = move(inverse(laid.get(toFace)), toFaceCoordinates(faceFrames[toFace], to));
+  const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+  if (length > reach) return null;
+  const dabs = [];
+  for (let travelled = spacing; travelled <= length; travelled += spacing) {
+    const at = [0, 1].map((k) => start[k] + ((end[k] - start[k]) * travelled) / length);
+    // The face laid flat that the dab is furthest inside of, as it may be
+    // on an edge.
+    let best = null;
+    for (const [f, motion] of laid) {
+      const [x, y] = move(motion, at);
+      const inside = Math.min(...corners[f].map((a, i) => leftOf([x, y], a, corners[f][(i + 1) % corners[f].length])));
+      if (!best || inside > best.inside) best = { face: f, x, y, inside };
+    }
+    const { center, right, up } = faceFrames[best.face];
+    dabs.push({ face: best.face, point: center.clone().addScaledVector(right, best.x).addScaledVector(up, best.y) });
+  }
+  return dabs;
+}
+
+// How much longer than through space the way to the next point of a stroke
+// on a kaleidocycle can be along its surface, for the stroke to join up.
+const FLAT_STROKE_REACH = 3;
+
+// Lays the faces of a kaleidocycle around face `start` flat in its
+// coordinates, crossing the edges that come within `reach` of `center`, a
+// point on it. For each face laid, gives the motion taking the start face's
+// coordinates to its own. The surface laid flat only overlaps itself past a
+// hinge's length, which is much larger than the brush.
+function layFlat(surface, start, center, reach) {
+  const { adjacent } = surface;
+  const corners = cornersOf(surface);
+  const laid = new Map([[start, { xx: 1, xy: 0, yx: 0, yy: 1, x: 0, y: 0 }]]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const f = queue.shift();
+    const motion = laid.get(f);
+    const here = move(motion, center);
+    corners[f].forEach((a, i) => {
+      const [g, j] = adjacent[f][i];
+      const b = corners[f][(i + 1) % corners[f].length];
+      if (laid.has(g) || distanceToSegment(here, a, b) >= reach) return;
+      // Edge j of face g runs the other way, from b to a.
+      const across = edgeMotion(a, b, corners[g][(j + 1) % corners[g].length], corners[g][j]);
+      laid.set(g, compose(across, motion));
+      queue.push(g);
+    });
+  }
+  return laid;
+}
+
+// The corners of each face in its own coordinates, which stay the same as a
+// kaleidocycle turns.
+const faceCorners = new WeakMap();
+function cornersOf({ vertices, faces, faceFrames }) {
+  if (!faceCorners.has(faces)) {
+    faceCorners.set(
+      faces,
+      faces.map((face, f) => face.map((i) => toFaceCoordinates(faceFrames[f], vertices[i]))),
+    );
+  }
+  return faceCorners.get(faces);
+}
+
+function distanceToSegment([px, py], [ax, ay], [bx, by]) {
+  const [dx, dy] = [bx - ax, by - ay];
+  const t = Math.min(Math.max(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy), 0), 1);
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+}
+
+// How far a point is to the left of the line from a to b, which is inside a
+// face for each of its edges.
+function leftOf([px, py], [ax, ay], [bx, by]) {
+  return ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) / Math.hypot(bx - ax, by - ay);
+}
+
+// Motions of the plane, as { xx, xy, yx, yy, x, y } taking (u, v) to
+// (xx u + xy v + x, yx u + yy v + y).
+const move = ({ xx, xy, yx, yy, x, y }, [u, v]) => [xx * u + xy * v + x, yx * u + yy * v + y];
+
+function compose(outer, inner) {
+  const [x, y] = move(outer, [inner.x, inner.y]);
+  return {
+    xx: outer.xx * inner.xx + outer.xy * inner.yx,
+    xy: outer.xx * inner.xy + outer.xy * inner.yy,
+    yx: outer.yx * inner.xx + outer.yy * inner.yx,
+    yy: outer.yx * inner.xy + outer.yy * inner.yy,
+    x,
+    y,
+  };
+}
+
+// The inverse of a motion that turns without mirroring or scaling.
+function inverse({ xx, xy, yx, yy, x, y }) {
+  return { xx, xy: yx, yx: xy, yy, x: -(xx * x + yx * y), y: -(xy * x + yy * y) };
+}
+
+// The motion taking an edge from a to b onto one as long from c to d, without
+// mirroring. On an edge of a face, from a to b in its coordinates, which runs
+// from c to d in those of the face glued to it there, it takes the first face
+// into the second's coordinates, as the two lie unfolded flat about it.
+function edgeMotion([ax, ay], [bx, by], [cx, cy], [dx, dy]) {
+  const angle = Math.atan2(dy - cy, dx - cx) - Math.atan2(by - ay, bx - ax);
+  const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
+  return { xx: cos, xy: -sin, yx: sin, yy: cos, x: cx - (cos * ax - sin * ay), y: cy - (sin * ax + cos * ay) };
 }
 
 // Draws antialiased discs into the atlas, each clipped to its face's cell.
@@ -172,9 +359,13 @@ const pixelShader = {
 
 // Paints on a polyhedron's surface, repeating every dab by a symmetry group.
 //
-// A painting is { polyhedron, layout, history, redoStack }, where the history
-// holds strokes, bucket fills and clears. The texture is only a rendering of
+// A painting is { polyhedron, layout, history, redoStack, turn }, where the
+// history holds strokes, bucket fills and clears, and `turn` is how far a
+// kaleidocycle has turned (see atTurn()). The texture is only a rendering of
 // the history, so switching paintings, undoing and redoing all redraw from it.
+// A stroke's points are where they were on the solid as it stood when it was
+// painted, so a stroke keeps the turn it was painted at. It also keeps the
+// face each point is on, as a point on an edge can't tell.
 export class Painter {
   constructor(renderer) {
     this.renderer = renderer;
@@ -265,27 +456,31 @@ export class Painter {
     this.redraw();
   }
 
+  // The painting's solid as it stands at a turn, by default the current one.
+  surface(turn = this.painting.turn) {
+    return atTurn(this.painting.polyhedron, turn);
+  }
+
   // `group` is the symmetry group that repeats the stroke; `radius` is in
   // world units, `color` a linear THREE.Color, or null to paint transparent.
   beginStroke(point, { group, color, radius }) {
-    this.stroke = { type: 'stroke', group, color: color?.clone() ?? null, radius, points: [] };
+    const { turn } = this.painting;
+    this.stroke = { type: 'stroke', group, color: color?.clone() ?? null, radius, turn, points: [], faces: [] };
     this.lastDab = null;
     this.extendStroke(point);
   }
 
   extendStroke(point) {
-    if (!this.lastDab) {
-      this.addDab(point);
-      return;
+    const surface = this.surface(this.stroke.turn);
+    if (this.lastDab) {
+      const spacing = Math.max(this.stroke.radius * DAB_SPACING, 1 / this.painting.layout.density);
+      const dabs = strokeDabs(surface, this.lastDab, this.lastFace, point, spacing);
+      if (dabs) {
+        for (const dab of dabs) this.addDab(dab.point, dab.face);
+        return;
+      }
     }
-    // Dabs go along the chord to the new point, pushed back out onto the
-    // surface, so a stroke crossing an edge follows the surface around it.
-    const from = this.lastDab;
-    const distance = from.distanceTo(point);
-    const spacing = Math.max(this.stroke.radius * DAB_SPACING, 1 / this.painting.layout.density);
-    for (let travelled = spacing; travelled <= distance; travelled += spacing) {
-      this.addDab(projectToSurface(this.painting.polyhedron, from.clone().lerp(point, travelled / distance)));
-    }
+    this.addDab(point, faceAt(surface, point));
   }
 
   // Breaks the stroke without ending it, e.g. when the pointer leaves the
@@ -304,8 +499,9 @@ export class Painter {
   // to fill with transparent paint.
   bucketFill(point, { group, color }) {
     const { polyhedron, layout } = this.painting;
-    const face = faceAt(polyhedron, point);
-    const [x, y] = toFaceCoordinates(polyhedron.faceFrames[face], point);
+    const surface = this.surface();
+    const face = faceAt(surface, point);
+    const [x, y] = toFaceCoordinates(surface.faceFrames[face], point);
     const seeds = group.elements.map(({ faceMaps }) => {
       const { face: image, xx, xy, yx, yy } = faceMaps[face];
       const { originX, originY } = layout.cells[image];
@@ -382,9 +578,10 @@ export class Painter {
   // transparent enough to show as a hole.
   colorAt(point) {
     this.flush();
-    const { polyhedron, layout } = this.painting;
-    const face = faceAt(polyhedron, point);
-    const [x, y] = toFaceCoordinates(polyhedron.faceFrames[face], point);
+    const { layout } = this.painting;
+    const surface = this.surface();
+    const face = faceAt(surface, point);
+    const [x, y] = toFaceCoordinates(surface.faceFrames[face], point);
     const { originX, originY } = layout.cells[face];
     const column = THREE.MathUtils.clamp(Math.floor(originX + x * layout.density), 0, layout.width - 1);
     const row = THREE.MathUtils.clamp(Math.floor(originY + y * layout.density), 0, layout.height - 1);
@@ -437,7 +634,7 @@ export class Painter {
     } else if (action.type === 'bucket') {
       this.drawBucket(action);
     } else {
-      for (const point of action.points) this.drawDab(point, action);
+      action.points.forEach((point, k) => this.drawDab(point, action.faces[k], action));
     }
   }
 
@@ -480,10 +677,12 @@ export class Painter {
     geometry.dispose();
   }
 
-  addDab(point) {
+  addDab(point, face) {
     this.stroke.points.push(point);
-    this.drawDab(point, this.stroke);
+    this.stroke.faces.push(face);
+    this.drawDab(point, face, this.stroke);
     this.lastDab = point;
+    this.lastFace = face;
   }
 
   fill() {
@@ -491,21 +690,9 @@ export class Painter {
     this.queueDab(width / 2, height / 2, width + height, BASE_COLOR, [0, 0, width, height]);
   }
 
-  // A dab paints where a ball around the point meets the surface, so it
-  // carries on across edges and corners. On each face plane the ball cuts,
-  // that is a disc around the point's projection onto the plane. On solids
-  // that aren't convex, the point can be in front of a face's plane as well
-  // as behind it.
-  drawDab(point, { group, color, radius }) {
-    const { polyhedron, layout } = this.painting;
-    const footprint = [];
-    polyhedron.faceFrames.forEach((frame, face) => {
-      const depth = Math.abs(frame.offset - frame.normal.dot(point));
-      if (depth >= radius) return;
-      const [x, y] = toFaceCoordinates(frame, point);
-      footprint.push({ face, x, y, radius: Math.sqrt(radius * radius - depth * depth) });
-    });
-
+  drawDab(point, face, { group, color, radius, turn }) {
+    const { layout } = this.painting;
+    const footprint = dabFootprint(this.surface(turn), point, face, radius, CELL_MARGIN / layout.density);
     for (const { faceMaps } of group.elements) {
       for (const { face, x, y, radius: discRadius } of footprint) {
         const { face: image, xx, xy, yx, yy } = faceMaps[face];

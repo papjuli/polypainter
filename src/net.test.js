@@ -30,7 +30,11 @@ const corners = [[0, 0], [0, PAGE_HEIGHT - 41], [PAGE_WIDTH - 41, PAGE_HEIGHT - 
 
 for (const [id, solid] of POLYHEDRA) {
   const nets = loadNets(id);
-  assert.deepEqual(Object.keys(nets).sort(), ['glue', 'interlocking'], id);
+  // The edges as the net sees them, each joining two faces. A kaleidocycle's
+  // hinges join four, so each counts twice.
+  const seamCount = solid.faces.reduce((count, face) => count + face.length, 0) / 2;
+  // Kaleidocycles are only glued: turning one pulls on its seams.
+  assert.deepEqual(Object.keys(nets).sort(), solid.ring ? ['glue'] : ['glue', 'interlocking'], id);
   for (const [assembly, net] of Object.entries(nets)) {
     const name = `${id} ${assembly}`;
     assert.ok(net.scale > 0, name);
@@ -72,12 +76,43 @@ for (const [id, solid] of POLYHEDRA) {
   const glue = nets.glue;
   assert.equal(glue.slits.length, 0, id);
   assert.equal(glue.printSlits.length, 0, id);
-  assert.equal(glue.cuts.length / 2 + glue.folds.length - glue.tabs.length, solid.edges.length, id);
+  assert.equal(glue.cuts.length / 2 + glue.folds.length - glue.tabs.length, seamCount, id);
   // Every cut edge has a tab on one side: its other side is cut, and the
   // tab's outline is cut in place of the side it's on.
   assert.equal(glue.cuts.length, glue.tabs.length * 2, id);
   for (const outline of glue.tabs) {
     assert.ok(glue.folds.some(([p, q]) => distance(outline[0], p) < 1e-6 && distance(outline.at(-1), q) < 1e-6), id);
+  }
+
+  // A kaleidocycle's net is the usual strip of its triangles, with each
+  // tetrahedron's four faces in a row and the rows one above another along the
+  // ring, the hinges across the strip between them. Its ends are two hinges
+  // long and its sides zigzag half a hinge apart, so it is two and a half
+  // hinges wide. It has a tab for each row's two ends to meet, and two for
+  // the ends of the strip.
+  if (solid.ring) {
+    const { count } = solid.ring;
+    const [start, end] = glue.faces[0];
+    const hinge = distance(start, end);
+    const [ux, uy] = [(end[0] - start[0]) / hinge, (end[1] - start[1]) / hinge];
+    const along = ([x, y]) => (x - start[0]) * ux + (y - start[1]) * uy;
+    const across = ([x, y]) => (y - start[1]) * ux - (x - start[0]) * uy;
+    const levels = Array.from({ length: count }, (_, k) => {
+      const heights = glue.faces.slice(4 * k, 4 * k + 4).flat().map(across);
+      return [Math.min(...heights), Math.max(...heights)];
+    });
+    const height = levels[0][1] - levels[0][0];
+    levels.forEach(([bottom, top], k) => {
+      near(bottom, k * height);
+      near(top, (k + 1) * height);
+    });
+    for (const face of glue.faces) {
+      near(across(face[0]), across(face[1]));
+    }
+    const lengths = glue.faces.flat().map(along);
+    near(Math.max(...lengths) - Math.min(...lengths), 2.5 * hinge);
+    assert.equal(glue.tabs.length, count + 2, id);
+    continue;
   }
 
   const net = nets.interlocking;
@@ -86,7 +121,7 @@ for (const [id, solid] of POLYHEDRA) {
   assert.equal(net.slits.length, seams, id);
   assert.equal(net.printSlits.length, seams, id);
   assert.equal(net.cuts.length, seams * 4, id);
-  assert.equal(net.folds.length - seams * 3, solid.edges.length - seams, id);
+  assert.equal(net.folds.length - seams * 3, seamCount - seams, id);
   const edges = net.faces.flatMap((face, f) => face.map((p, k) => ({
     f, k, side: [p, face[(k + 1) % face.length]],
   })));
@@ -105,7 +140,9 @@ for (const [id, solid] of POLYHEDRA) {
     assert.ok(net.folds.some(([p, q]) => distance(a, p) < 1e-6 && distance(d, q) < 1e-6), id);
 
     // Find the tab's original edge, then follow its vertex IDs to the
-    // matching face. This checks that its slit is on the correct seam.
+    // matching face. This checks that its slit is on the correct seam. On a
+    // hinge of a kaleidocycle, two faces run between the same vertices, so
+    // the face is the one the solid says lies across the edge.
     const source = edges.find(({ side }) => [a, d].every((p) => {
       const [u, v] = edgeCoordinates(side, p);
       return u > 0 && u < 1 && Math.abs(v) < 1e-6;
@@ -113,9 +150,11 @@ for (const [id, solid] of POLYHEDRA) {
     assert.ok(source, id);
     const edge = solid.faces[source.f];
     const start = edge[source.k], end = edge[(source.k + 1) % edge.length];
-    const target = edges.find(({ f, k }) => solid.faces[f][k] === end &&
-      solid.faces[f][(k + 1) % solid.faces[f].length] === start);
+    const [across, acrossEdge] = solid.adjacent[source.f][source.k];
+    const target = edges.find(({ f, k }) => f === across && k === acrossEdge);
     assert.ok(target, id);
+    assert.ok(solid.faces[across][acrossEdge] === end &&
+      solid.faces[across][(acrossEdge + 1) % solid.faces[across].length] === start, id);
     const length = distance(...source.side);
     assert.ok(width <= length * 0.3 && depth <= length * 0.15, id);
     near(edgeCoordinates(source.side, a)[0] + edgeCoordinates(source.side, d)[0], 1);
@@ -172,4 +211,4 @@ const slitPath = dxf.slice(dxf.indexOf('0\nPOLYLINE\n'), dxf.indexOf('0\nSEQEND\
 assert.equal((slitPath.match(/0\nVERTEX\n/g) ?? []).length, 2);
 assert.ok(slitPath.includes('10\n1\n20\n2\n') && slitPath.includes('10\n3\n20\n2\n'));
 assert.ok(!dxf.includes('20\n2.5000\n'));
-console.log(`Passed: the saved glue and interlocking nets of all ${POLYHEDRA.size} solids match their faces, fit the page without overlaps and with edges up to 50 mm, fold and cut every edge, and have well-formed tabs and slits; DXF slits stay straight.`);
+console.log(`Passed: the saved glue and interlocking nets of all ${POLYHEDRA.size} solids (only glue for kaleidocycles, as strips) match their faces, fit the page without overlaps and with edges up to 50 mm, fold and cut every edge, and have well-formed tabs and slits; DXF slits stay straight.`);

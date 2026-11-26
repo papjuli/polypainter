@@ -33,6 +33,9 @@ Try it here: **https://papjuli.github.io/polypainter/**.
   the groups. -->
 - Drag on the solid to paint; strokes carry on across edges and corners. Rings
   show where the brush and all of its copies will land.
+- Check Pointy ends to paint strokes that come to a point at both ends. The end
+  of a stroke comes to its point when you let go. A short flick makes a leaf
+  shape, and a click still makes a round dot. Erasing always has round ends.
 - With the Fill tool, click to fill the area of the color under the pointer,
   along with its symmetric copies. Fills spread across edges like strokes.
 - The checkered swatch paints and fills transparently, cutting holes through
@@ -153,7 +156,11 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   as on its paper: there a hinge's faces are glued in pairs, so paint on one
   side of a hinge stays off the two faces behind it. Strokes are stored, so the
   texture can be redrawn for undo and when switching solids, each at the turn a
-  kaleidocycle stood at when it was painted. The texture keeps its alpha premultiplied,
+  kaleidocycle stood at when it was painted. Each dab of a stroke keeps its own
+  radius, which shrinks toward a pointy stroke's ends, with the dabs closer
+  together there. The end of a stroke is only known once you let go, so then
+  the painter puts back a copy of the texture from before the stroke and draws
+  the stroke again, tapered at both ends. The texture keeps its alpha premultiplied,
   so the edges of transparent paint blend as cleanly as those of colors. The
   Pick tool reads its color from the texture, not from the rendered scene.
 - `src/fill.js` flood fills the texture atlas, stepping from a face's cell to

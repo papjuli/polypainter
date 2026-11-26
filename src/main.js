@@ -43,6 +43,7 @@ const transparentSwatch = document.getElementById('transparent-color');
 const customColor = document.getElementById('custom-color');
 const recentSwatches = document.getElementById('recent-colors');
 const brushSize = document.getElementById('brush-size');
+const taperedCheckbox = document.getElementById('tapered');
 const undoButton = document.getElementById('undo');
 const redoButton = document.getElementById('redo');
 const clearButton = document.getElementById('clear');
@@ -721,6 +722,8 @@ viewport.addEventListener(
       group: current.painting.group,
       color: tool === 'erase' ? BASE_COLOR : brushColor,
       radius: brushRadius(),
+      // Erasing tapered would leave the ends of what it goes over behind.
+      tapered: tool === 'paint' && taperedCheckbox.checked,
     });
     showCursor(point);
   },

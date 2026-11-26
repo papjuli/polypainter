@@ -8,9 +8,17 @@ const MAX_ATLAS_SIZE = 4096;
 // Each cell keeps a margin around its face, painted as the face's extension,
 // so texture filtering at the face's edges doesn't pick up unpainted texels.
 const CELL_MARGIN = 8;
-// Distance between consecutive dabs of a stroke, relative to the brush radius.
+// Distance between consecutive dabs of a stroke, relative to their radius.
 const DAB_SPACING = 0.25;
+// How far along a tapered stroke it takes to come to a point at either end,
+// relative to the brush radius.
+const TAPER_LENGTH = 6;
 const BATCH_SIZE = 8192;
+
+// A tapered stroke's radius, relative to the full radius, at a fraction `t`
+// of the way along its taper: growing from a point, and leveling off so that
+// the taper joins the rest of the stroke without a kink.
+const taper = (t) => (t >= 1 ? 1 : t <= 0 ? 0 : t * (2 - t));
 
 export const BASE_COLOR = new THREE.Color('#f3efe6');
 
@@ -365,14 +373,19 @@ const pixelShader = {
 // the history, so switching paintings, undoing and redoing all redraw from it.
 // A stroke's points are where they were on the solid as it stood when it was
 // painted, so a stroke keeps the turn it was painted at. It also keeps the
-// face each point is on, as a point on an edge can't tell.
+// face each point is on, as a point on an edge can't tell, and the radius of
+// the dab there, which is smaller toward a tapered stroke's ends.
 export class Painter {
   constructor(renderer) {
     this.renderer = renderer;
     this.painting = null;
     this.target = null;
+    // A copy of the texture from before a tapered stroke, see beginStroke().
+    this.snapshot = null;
     this.stroke = null;
-    this.lastDab = null;
+    this.path = [];
+    this.lifted = false;
+    this.tapered = false;
     this.queued = 0;
     this.queuedTransparent = false;
 
@@ -440,6 +453,8 @@ export class Painter {
   // Switches to another painting, with a texture of its own.
   load(painting) {
     this.target?.dispose();
+    this.snapshot?.dispose();
+    this.snapshot = null;
     const { width, height } = painting.layout;
     this.target = new THREE.WebGLRenderTarget(width, height, {
       colorSpace: THREE.SRGBColorSpace,
@@ -463,35 +478,124 @@ export class Painter {
 
   // `group` is the symmetry group that repeats the stroke; `radius` is in
   // world units, `color` a linear THREE.Color, or null to paint transparent.
-  beginStroke(point, { group, color, radius }) {
+  // A `tapered` stroke comes to a point at both ends.
+  beginStroke(point, { group, color, radius, tapered = false }) {
     const { turn } = this.painting;
-    this.stroke = { type: 'stroke', group, color: color?.clone() ?? null, radius, turn, points: [], faces: [] };
-    this.lastDab = null;
+    this.stroke = { type: 'stroke', group, color: color?.clone() ?? null, radius, turn, points: [], faces: [], radii: [] };
+    this.path = [];
+    this.lifted = false;
+    this.tapered = tapered;
+    // Where a stroke ends is only known once it has, so its end is tapered
+    // then, by putting back the texture from before the stroke and drawing
+    // the stroke again. Replaying the whole history instead, as undo does,
+    // would hold up the end of every stroke on a well-painted solid.
+    if (tapered) this.saveSnapshot();
     this.extendStroke(point);
   }
 
   extendStroke(point) {
     const surface = this.surface(this.stroke.turn);
-    if (this.lastDab) {
-      const spacing = Math.max(this.stroke.radius * DAB_SPACING, 1 / this.painting.layout.density);
-      const dabs = strokeDabs(surface, this.lastDab, this.lastFace, point, spacing);
+    const last = this.lifted ? null : this.path.at(-1);
+    this.lifted = false;
+    if (last) {
+      const dabs = strokeDabs(surface, last.point, last.face, point, this.spacing(this.stroke.radius));
       if (dabs) {
-        for (const dab of dabs) this.addDab(dab.point, dab.face);
+        for (const dab of dabs) this.extendPath(surface, dab, true);
         return;
       }
     }
-    this.addDab(point, faceAt(surface, point));
+    this.extendPath(surface, { point, face: faceAt(surface, point) }, false);
   }
 
   // Breaks the stroke without ending it, e.g. when the pointer leaves the
   // solid, so it isn't joined up across the gap.
   liftStroke() {
-    this.lastDab = null;
+    this.lifted = true;
   }
 
   endStroke() {
+    if (this.tapered && this.snapshot) this.taperEnd();
     if (this.stroke.points.length > 0) this.record(this.stroke);
     this.stroke = null;
+    this.path = [];
+  }
+
+  // The stroke's path holds the points where dabs of the brush's full radius
+  // would go, each with how far along the stroke it is, `s`, and whether it
+  // is `joined` to the point before it. This adds a point to it and paints up
+  // to it. While the stroke goes on, only its start is tapered.
+  extendPath(surface, { point, face }, joined) {
+    const last = this.path.at(-1);
+    const s = last ? last.s + (joined ? last.point.distanceTo(point) : 0) : 0;
+    const next = { point, face, s, joined };
+    this.path.push(next);
+    const { radius } = this.stroke;
+    const radiusAt = this.tapered ? (s) => radius * taper(s / (TAPER_LENGTH * radius)) : () => radius;
+    for (const dab of this.dabsTo(surface, joined ? last : null, next, radiusAt)) this.addDab(dab);
+  }
+
+  // Draws the stroke again with both of its ends tapered, now that it is
+  // known where it ends, over the texture as it was before the stroke. A
+  // stroke too short to reach its full radius from both ends tapers over half
+  // its length at each, so a short flick makes a leaf shape, and a click that
+  // doesn't go anywhere makes a round dot.
+  taperEnd() {
+    const { stroke, path } = this;
+    const surface = this.surface(stroke.turn);
+    const length = path.at(-1).s;
+    const reach = Math.min(TAPER_LENGTH * stroke.radius, length / 2);
+    const radiusAt = (s) => (reach > 0 ? stroke.radius * taper(Math.min(s, length - s) / reach) : stroke.radius);
+    this.restoreSnapshot();
+    Object.assign(stroke, { points: [], faces: [], radii: [] });
+    path.forEach((next, k) => {
+      for (const dab of this.dabsTo(surface, next.joined ? path[k - 1] : null, next, radiusAt)) this.addDab(dab);
+    });
+  }
+
+  // The dabs from a point of the stroke's path, which has had its dab, up to
+  // and including the next. The path is spaced for the full radius, so where
+  // the radius is smaller, toward a tapered end, more dabs go in between. A
+  // stroke's radius only grows and then shrinks along it, so it is smallest
+  // between two points at one of them.
+  dabsTo(surface, from, to, radiusAt) {
+    const dabs = [];
+    if (from) {
+      const spacing = this.spacing(Math.min(radiusAt(from.s), radiusAt(to.s)));
+      if (from.point.distanceTo(to.point) > 1.5 * spacing) {
+        for (const { point, face } of strokeDabs(surface, from.point, from.face, to.point, spacing) ?? []) {
+          // `to` gets its own dab, below.
+          if (point.distanceTo(to.point) < spacing / 2) continue;
+          dabs.push({ point, face, radius: radiusAt(from.s + from.point.distanceTo(point)) });
+        }
+      }
+    }
+    dabs.push({ point: to.point, face: to.face, radius: radiusAt(to.s) });
+    return dabs;
+  }
+
+  // The distance between dabs of a radius, at least a texel.
+  spacing(radius) {
+    return Math.max(radius * DAB_SPACING, 1 / this.painting.layout.density);
+  }
+
+  // Copies the texture to put back by restoreSnapshot(). Strokes, fills and
+  // the rest can't happen in between, apart from switching paintings, which
+  // throws the copy away.
+  saveSnapshot() {
+    this.flush();
+    if (!this.snapshot) {
+      const { width, height } = this.painting.layout;
+      this.snapshot = new THREE.WebGLRenderTarget(width, height, { colorSpace: THREE.SRGBColorSpace, depthBuffer: false });
+      this.renderer.initRenderTarget(this.snapshot);
+    }
+    this.renderer.copyTextureToTexture(this.target.texture, this.snapshot.texture);
+  }
+
+  // Puts back the texture from saveSnapshot(), dropping the dabs queued
+  // since, which all belong to the stroke it was saved for.
+  restoreSnapshot() {
+    this.queued = 0;
+    this.renderer.copyTextureToTexture(this.snapshot.texture, this.target.texture);
   }
 
   // Fills the area of about the same color around the point, and the areas
@@ -634,7 +738,7 @@ export class Painter {
     } else if (action.type === 'bucket') {
       this.drawBucket(action);
     } else {
-      action.points.forEach((point, k) => this.drawDab(point, action.faces[k], action));
+      action.points.forEach((point, k) => this.drawDab(point, action.faces[k], action.radii[k], action));
     }
   }
 
@@ -677,12 +781,11 @@ export class Painter {
     geometry.dispose();
   }
 
-  addDab(point, face) {
+  addDab({ point, face, radius }) {
     this.stroke.points.push(point);
     this.stroke.faces.push(face);
-    this.drawDab(point, face, this.stroke);
-    this.lastDab = point;
-    this.lastFace = face;
+    this.stroke.radii.push(radius);
+    this.drawDab(point, face, radius, this.stroke);
   }
 
   fill() {
@@ -690,7 +793,7 @@ export class Painter {
     this.queueDab(width / 2, height / 2, width + height, BASE_COLOR, [0, 0, width, height]);
   }
 
-  drawDab(point, face, { group, color, radius, turn }) {
+  drawDab(point, face, radius, { group, color, turn }) {
     const { layout } = this.painting;
     const footprint = dabFootprint(this.surface(turn), point, face, radius, CELL_MARGIN / layout.density);
     for (const { faceMaps } of group.elements) {

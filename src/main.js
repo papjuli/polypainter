@@ -6,6 +6,7 @@ import { PIXELS_PER_MM, drawNet, findHoles } from './net.js';
 import { BASE_COLOR, Painter, createAtlasLayout } from './painter.js';
 import { setPixelsPerMeter } from './png.js';
 import { POLYHEDRA, atTurn, faceAt, toFaceCoordinates } from './polyhedra.js';
+import { SHAPES, SHAPE_DISTANCE, shapeIndex } from './shapes.js';
 import { symmetryGroups } from './symmetry.js';
 import './style.css';
 
@@ -17,6 +18,9 @@ const RECENT_COLORS_KEY = 'polypainter.recentColors';
 // Brush radius per step of the size slider, in world units (the solids have
 // a circumradius of 1).
 const BRUSH_RADIUS_STEP = 0.004;
+// A stamp's radius relative to the brush's at the same size. A shape needs to
+// be larger than a stroke is wide to make out.
+const STAMP_SCALE = 2;
 // Radius of the rings marking where a bucket fill starts.
 const FILL_CURSOR_RADIUS = 0.02;
 // Brightness of the solid's inside, which shows through transparent paint,
@@ -43,7 +47,12 @@ const transparentSwatch = document.getElementById('transparent-color');
 const customColor = document.getElementById('custom-color');
 const recentSwatches = document.getElementById('recent-colors');
 const brushSize = document.getElementById('brush-size');
+const taperedOption = document.getElementById('tapered-option');
 const taperedCheckbox = document.getElementById('tapered');
+const shapeField = document.getElementById('shape-field');
+const shapePicker = document.getElementById('shape-picker');
+const angleField = document.getElementById('angle-field');
+const angleSlider = document.getElementById('stamp-angle');
 const undoButton = document.getElementById('undo');
 const redoButton = document.getElementById('redo');
 const clearButton = document.getElementById('clear');
@@ -200,19 +209,47 @@ for (const polyhedron of POLYHEDRA.values()) {
 picker.addEventListener('change', () => select(picker.value));
 let current = null;
 
-// Rings showing where the brush and all of its symmetric copies will paint.
+// Outlines showing where the brush or stamp and all of its symmetric copies
+// will paint: rings for the brush, and the stamp's shape, from the same
+// distance functions it is painted with. Each copy is a square around its
+// shape, in which the outline is a band just inside the shape's edge.
 const maxGroupOrder = Math.max(
   ...[...solids.values()].flatMap(({ painting }) => painting.groups.map((group) => group.order)),
 );
 const cursor = new THREE.InstancedMesh(
-  new THREE.RingGeometry(0.85, 1, 48),
-  // Inverts what's behind it, so it shows on any paint color.
-  new THREE.MeshBasicMaterial({
+  new THREE.PlaneGeometry(2, 2),
+  new THREE.ShaderMaterial({
+    uniforms: { shape: { value: 0 } },
+    vertexShader: /* glsl */ `
+      varying vec2 vPoint;
+
+      void main() {
+        vPoint = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform int shape;
+      varying vec2 vPoint;
+
+      ${SHAPE_DISTANCE}
+
+      void main() {
+        float d = shapeDistance(shape, vPoint);
+        float pixel = fwidth(d);
+        float coverage = clamp(0.5 - d / pixel, 0.0, 1.0) * clamp(0.5 + (d + 0.15) / pixel, 0.0, 1.0);
+        if (coverage == 0.0) discard;
+        gl_FragColor = vec4(vec3(coverage), coverage);
+      }
+    `,
     transparent: true,
     depthWrite: false,
+    // A copy that a symmetry mirrors is seen from behind.
+    side: THREE.DoubleSide,
+    // Inverts what's behind it, so it shows on any paint color.
     blending: THREE.CustomBlending,
     blendSrc: THREE.OneMinusDstColorFactor,
-    blendDst: THREE.ZeroFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
   }),
   maxGroupOrder,
 );
@@ -220,19 +257,22 @@ cursor.frustumCulled = false;
 cursor.visible = false;
 scene.add(cursor);
 
-const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const cursorTransform = new THREE.Matrix4();
-const cursorRotation = new THREE.Quaternion();
-const cursorScale = new THREE.Vector3();
+const cursorAxes = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
-// Each copy goes where its symmetry takes the point's face coordinates. Not
-// all of a kaleidocycle's symmetries are motions of it in space.
+// Each copy goes where its symmetry takes the point's face coordinates, and
+// a stamp's axes. Not all of a kaleidocycle's symmetries are motions of it
+// in space.
 function showCursor(point) {
   const { group } = current.painting;
   const surface = painter.surface();
   const face = faceAt(surface, point);
   const [x, y] = toFaceCoordinates(surface.faceFrames[face], point);
-  cursorScale.setScalar(tool === 'fill' ? FILL_CURSOR_RADIUS : brushRadius());
+  const stamping = tool === 'stamp';
+  const radius = stamping ? stampRadius() : tool === 'fill' ? FILL_CURSOR_RADIUS : brushRadius();
+  const angle = stamping ? stampAngle(surface.faceFrames[face]) : 0;
+  const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
+  cursor.material.uniforms.shape.value = stamping ? shapeIndex(stampShape) : 0;
   group.elements.forEach(({ faceMaps }, i) => {
     const { face: image, xx, xy, yx, yy } = faceMaps[face];
     const { center, right, up, normal } = surface.faceFrames[image];
@@ -241,8 +281,12 @@ function showCursor(point) {
       .addScaledVector(right, xx * x + xy * y)
       .addScaledVector(up, yx * x + yy * y)
       .addScaledVector(normal, 0.002);
-    cursorRotation.setFromUnitVectors(Z_AXIS, normal);
-    cursorTransform.compose(position, cursorRotation, cursorScale);
+    const [xAxis, yAxis, zAxis] = cursorAxes;
+    xAxis.copy(right).multiplyScalar(xx * cos + xy * sin).addScaledVector(up, yx * cos + yy * sin);
+    yAxis.copy(right).multiplyScalar(xy * cos - xx * sin).addScaledVector(up, yy * cos - yx * sin);
+    zAxis.copy(normal);
+    for (const axis of cursorAxes) axis.multiplyScalar(radius);
+    cursorTransform.makeBasis(xAxis, yAxis, zAxis).setPosition(position);
     cursor.setMatrixAt(i, cursorTransform);
   });
   cursor.count = group.elements.length;
@@ -333,6 +377,7 @@ const PAINT_HINT = 'Drag on the solid to paint · Alt+click to pick a color · D
 const HINTS = {
   paint: PAINT_HINT,
   erase: PAINT_HINT,
+  stamp: 'Click on the solid to stamp · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom',
   fill: 'Click on the solid to fill an area · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom',
   pick: 'Click on the solid to pick up a color · Drag around it or right-drag to rotate · Scroll to zoom',
   rotate: 'Drag to rotate · Scroll or pinch to zoom',
@@ -350,6 +395,11 @@ function setTool(name) {
   }
   viewport.classList.toggle('painting', name !== 'rotate');
   hint.textContent = HINTS[name];
+  // Each tool's options show while it is chosen, and while the Pick tool is
+  // used on the way back to it.
+  const options = name === 'pick' ? toolBeforePick : name;
+  taperedOption.hidden = options !== 'paint';
+  shapeField.hidden = angleField.hidden = options !== 'stamp';
   hideCursor();
 }
 
@@ -452,12 +502,51 @@ function pickColor(point) {
   if (swatch === customColor) customColor.value = hex;
   setColor(hex === null ? null : new THREE.Color(hex), swatch);
   // Like an eyedropper, the Pick tool is used once and hands back to the
-  // brush. An Alt+click leaves the tool as it was, except that picking a
-  // color ends erasing.
-  if (tool === 'pick') setTool(toolBeforePick === 'fill' ? 'fill' : 'paint');
+  // tool before it. An Alt+click leaves the tool as it was, except that
+  // picking a color ends erasing.
+  if (tool === 'pick') setTool(toolBeforePick === 'erase' ? 'paint' : toolBeforePick);
 }
 
 const brushRadius = () => Number(brushSize.value) * BRUSH_RADIUS_STEP;
+const stampRadius = () => brushRadius() * STAMP_SCALE;
+
+let stampShape = SHAPES[0].id;
+
+function setShape(id) {
+  stampShape = id;
+  for (const button of shapePicker.children) {
+    button.setAttribute('aria-pressed', String(button.dataset.shape === id));
+  }
+}
+
+for (const { id, label, icon } of SHAPES) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.shape = id;
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.innerHTML = `<svg viewBox="-1 -1 2 2" aria-hidden="true">${icon}</svg>`;
+  button.addEventListener('click', () => setShape(id));
+  shapePicker.appendChild(button);
+}
+setShape(stampShape);
+
+const screenRight = new THREE.Vector3();
+const screenUp = new THREE.Vector3();
+
+// How far a stamp on a face is turned, counterclockwise from pointing along
+// the face's up axis: so that it stands upright on the screen, and then
+// turned clockwise by the Angle slider. Upright on the screen is the
+// direction in the face that goes neither left nor right on it.
+function stampAngle({ normal, right, up }) {
+  screenRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  screenUp.crossVectors(normal, screenRight);
+  return Math.atan2(-screenUp.dot(right), screenUp.dot(up)) - THREE.MathUtils.degToRad(Number(angleSlider.value));
+}
+
+angleSlider.addEventListener('input', () => {
+  angleSlider.title = `${angleSlider.value}°`;
+});
 
 function updateHistoryButtons() {
   undoButton.disabled = !painter.canUndo;
@@ -711,6 +800,15 @@ viewport.addEventListener(
     setPlaying(false);
     if (tool === 'fill') {
       runCommand(() => painter.bucketFill(point, { group: current.painting.group, color: brushColor }));
+      rememberColor(customBrushColor());
+      showCursor(point);
+      return;
+    }
+    if (tool === 'stamp') {
+      const surface = painter.surface();
+      const angle = stampAngle(surface.faceFrames[faceAt(surface, point)]);
+      const { group } = current.painting;
+      runCommand(() => painter.stamp(point, { group, color: brushColor, shape: stampShape, radius: stampRadius(), angle }));
       rememberColor(customBrushColor());
       showCursor(point);
       return;

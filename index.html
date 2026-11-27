@@ -42,11 +42,17 @@
         <span class="label">Tool</span>
         <div id="tool-picker" class="segmented">
           <button type="button" data-tool="paint">Paint</button>
+          <button type="button" data-tool="stamp">Stamp</button>
           <button type="button" data-tool="fill">Fill</button>
           <button type="button" data-tool="erase">Erase</button>
           <button type="button" data-tool="pick" title="Pick up a color painted on the solid (or Alt+click with the other tools)">Pick</button>
           <button type="button" data-tool="rotate">Rotate</button>
         </div>
+      </div>
+
+      <div id="shape-field" class="field" hidden>
+        <span class="label">Shape</span>
+        <div id="shape-picker" class="segmented shapes" role="group" aria-label="Stamp shape"></div>
       </div>
 
       <div class="field">
@@ -59,12 +65,16 @@
       </div>
 
       <div class="field">
-        <label for="brush-size">Brush size</label>
+        <label for="brush-size">Size</label>
         <input id="brush-size" type="range" min="1" max="40" value="8" />
       </div>
-      <label class="checkbox" title="Paint strokes that come to a point at both ends">
+      <label id="tapered-option" class="checkbox" title="Paint strokes that come to a point at both ends">
         <input id="tapered" type="checkbox" /> Pointy ends
       </label>
+      <div id="angle-field" class="field" hidden>
+        <label for="stamp-angle">Angle</label>
+        <input id="stamp-angle" type="range" min="-180" max="180" step="5" value="0" title="0°" />
+      </div>
 
       <div class="actions">
         <button id="undo" type="button">Undo</button>

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { floodFill } from './fill.js';
 import { atTurn, faceAt, surfacePoint, toFaceCoordinates } from './polyhedra.js';
+import { SHAPE_DISTANCE, shapeIndex } from './shapes.js';
 
 // The paint lives in a texture atlas with one cell per face.
 const TEXELS_PER_UNIT = 640;
@@ -146,6 +147,24 @@ function flatFootprint(surface, point, face, radius, margin) {
   });
 }
 
+// Where a stamp of `radius` around a point on a solid, on face `face`, paints:
+// on each face it reaches, its center in the face's coordinates and the
+// directions its x and y axes point there. `angle` is how far it is turned
+// counterclockwise from pointing along the face's up axis.
+//
+// A stamp goes on like a sticker, laid flat across the edges it comes near,
+// as kaleidocycles are painted, so that it keeps its shape on every face. A
+// ball, which dabs go by, is the only shape that a solid cuts the same way
+// across every edge. Over a corner a sticker leaves a gap, as on paper.
+export function stampFootprint(surface, point, face, radius, angle, margin) {
+  const center = toFaceCoordinates(surface.faceFrames[face], point);
+  const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
+  return [...layFlat(surface, face, center, radius + margin)].map(([f, motion]) => {
+    const [x, y] = move(motion, center);
+    return { face: f, x, y, xAxis: linear(motion, [cos, sin]), yAxis: linear(motion, [-sin, cos]) };
+  });
+}
+
 // A stroke goes in a straight line on the surface laid flat. Going by the
 // chord instead, a stroke along a hinge, from one side of it to the other,
 // would cut under it where the faces in front of it make a ridge, and come
@@ -191,11 +210,14 @@ function flatStrokeDabs(surface, from, face, to, spacing) {
 // on a kaleidocycle can be along its surface, for the stroke to join up.
 const FLAT_STROKE_REACH = 3;
 
-// Lays the faces of a kaleidocycle around face `start` flat in its
-// coordinates, crossing the edges that come within `reach` of `center`, a
-// point on it. For each face laid, gives the motion taking the start face's
-// coordinates to its own. The surface laid flat only overlaps itself past a
-// hinge's length, which is much larger than the brush.
+// Lays the faces of a solid around face `start` flat in its coordinates,
+// crossing the edges that come within `reach` of `center`, a point on it. For
+// each face laid, gives the motion taking the start face's coordinates to its
+// own. A kaleidocycle's surface laid flat only overlaps itself past a hinge's
+// length, which is much larger than the brush. Around a corner of another
+// solid, the faces add up to less than a full turn, or more, so laid flat
+// they leave a gap, or would overlap; each face is laid once, from whichever
+// side reaches it first.
 function layFlat(surface, start, center, reach) {
   const { adjacent } = surface;
   const corners = cornersOf(surface);
@@ -247,6 +269,9 @@ function leftOf([px, py], [ax, ay], [bx, by]) {
 // (xx u + xy v + x, yx u + yy v + y).
 const move = ({ xx, xy, yx, yy, x, y }, [u, v]) => [xx * u + xy * v + x, yx * u + yy * v + y];
 
+// Where a motion, or a symmetry's map of a face, takes a direction.
+const linear = ({ xx, xy, yx, yy }, [u, v]) => [xx * u + xy * v, yx * u + yy * v];
+
 function compose(outer, inner) {
   const [x, y] = move(outer, [inner.x, inner.y]);
   return {
@@ -274,20 +299,27 @@ function edgeMotion([ax, ay], [bx, by], [cx, cy], [dx, dy]) {
   return { xx: cos, xy: -sin, yx: sin, yy: cos, x: cx - (cos * ax - sin * ay), y: cy - (sin * ax + cos * ay) };
 }
 
-// Draws antialiased discs into the atlas, each clipped to its face's cell.
-// Positions are in atlas texels.
+// Draws antialiased discs and stamp shapes into the atlas, each clipped to its
+// face's cell. Positions and radii are in atlas texels. A shape's axes are
+// the unit vectors its x and y axes point along in the atlas, one after the
+// other. They are perpendicular, so a texel's coordinates along them are
+// its offset from the center projected onto each.
 const dabShader = {
   vertexShader: /* glsl */ `
     attribute vec2 dabCenter;
     attribute float dabRadius;
     attribute vec3 dabColor;
     attribute vec4 dabRect;
+    attribute float dabShape;
+    attribute vec4 dabAxes;
 
     varying vec2 vPosition;
     varying vec2 vCenter;
     varying float vRadius;
     varying vec3 vColor;
     varying vec4 vRect;
+    varying float vShape;
+    varying vec4 vAxes;
 
     void main() {
       // One texel of slack so the antialiased rim isn't cut off.
@@ -296,6 +328,8 @@ const dabShader = {
       vRadius = dabRadius;
       vColor = dabColor;
       vRect = dabRect;
+      vShape = dabShape;
+      vAxes = dabAxes;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(vPosition, 0.0, 1.0);
     }
   `,
@@ -305,15 +339,26 @@ const dabShader = {
     varying float vRadius;
     varying vec3 vColor;
     varying vec4 vRect;
+    varying float vShape;
+    varying vec4 vAxes;
+
+    ${SHAPE_DISTANCE}
 
     void main() {
       if (any(lessThan(vPosition, vRect.xy)) || any(greaterThan(vPosition, vRect.zw))) discard;
-      float coverage = clamp(vRadius - distance(vPosition, vCenter) + 0.5, 0.0, 1.0);
+      // A vector times a matrix is its dot product with each column.
+      vec2 p = (vPosition - vCenter) * mat2(vAxes) / vRadius;
+      // The distance functions are in units of the radius.
+      float coverage = clamp(0.5 - shapeDistance(int(vShape + 0.5), p) * vRadius, 0.0, 1.0);
       if (coverage == 0.0) discard;
       gl_FragColor = vec4(vColor * coverage, coverage);
     }
   `,
 };
+
+// The axes of a dab that isn't turned: a disc's, and a stamp's that is
+// pointing along its face's up axis.
+const UNTURNED = [1, 0, 0, 1];
 
 // Draws a bucket fill over the whole atlas: its color wherever the mask is set.
 const bucketShader = {
@@ -368,7 +413,7 @@ const pixelShader = {
 // Paints on a polyhedron's surface, repeating every dab by a symmetry group.
 //
 // A painting is { polyhedron, layout, history, redoStack, turn }, where the
-// history holds strokes, bucket fills and clears, and `turn` is how far a
+// history holds strokes, stamps, bucket fills and clears, and `turn` is how far a
 // kaleidocycle has turned (see atTurn()). The texture is only a rendering of
 // the history, so switching paintings, undoing and redoing all redraw from it.
 // A stroke's points are where they were on the solid as it stood when it was
@@ -394,6 +439,8 @@ export class Painter {
       dabRadius: new THREE.InstancedBufferAttribute(new Float32Array(BATCH_SIZE), 1),
       dabColor: new THREE.InstancedBufferAttribute(new Float32Array(BATCH_SIZE * 3), 3),
       dabRect: new THREE.InstancedBufferAttribute(new Float32Array(BATCH_SIZE * 4), 4),
+      dabShape: new THREE.InstancedBufferAttribute(new Float32Array(BATCH_SIZE), 1),
+      dabAxes: new THREE.InstancedBufferAttribute(new Float32Array(BATCH_SIZE * 4), 4),
     };
     const geometry = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(2, 2));
     for (const [name, attribute] of Object.entries(this.attributes)) {
@@ -622,6 +669,18 @@ export class Painter {
     this.apply(action);
   }
 
+  // Stamps a shape around the point, and its images under `group`. `shape` is
+  // the id of one of SHAPES, `radius` the circle it fits in, in world units,
+  // and `angle` how far it is turned counterclockwise from pointing along
+  // the up axis of the point's face. `color` is as for strokes.
+  stamp(point, { group, color, shape, radius, angle }) {
+    const { turn } = this.painting;
+    const face = faceAt(this.surface(), point);
+    const action = { type: 'stamp', group, color: color?.clone() ?? null, shape, radius, angle, turn, point, face };
+    this.record(action);
+    this.apply(action);
+  }
+
   clear() {
     const action = { type: 'clear' };
     this.record(action);
@@ -737,6 +796,8 @@ export class Painter {
       this.fill();
     } else if (action.type === 'bucket') {
       this.drawBucket(action);
+    } else if (action.type === 'stamp') {
+      this.drawStamp(action);
     } else {
       action.points.forEach((point, k) => this.drawDab(point, action.faces[k], action.radii[k], action));
     }
@@ -811,17 +872,36 @@ export class Painter {
     }
   }
 
-  queueDab(x, y, radius, color, rect) {
+  drawStamp({ point, face, turn, shape, radius, angle, group, color }) {
+    const { layout } = this.painting;
+    const footprint = stampFootprint(this.surface(turn), point, face, radius, angle, CELL_MARGIN / layout.density);
+    const index = shapeIndex(shape);
+    for (const { faceMaps } of group.elements) {
+      for (const { face, x, y, xAxis, yAxis } of footprint) {
+        const map = faceMaps[face];
+        const { originX, originY, rect } = layout.cells[map.face];
+        const [u, v] = linear(map, [x, y]);
+        const axes = [...linear(map, xAxis), ...linear(map, yAxis)];
+        this.queueDab(originX + u * layout.density, originY + v * layout.density, radius * layout.density, color, rect, index, axes);
+      }
+    }
+  }
+
+  // `shape` is the index of a stamp's shape, or 0 for a disc, and `axes` are
+  // as in dabShader.
+  queueDab(x, y, radius, color, rect, shape = 0, axes = UNTURNED) {
     // Transparent dabs blend differently, so they are drawn in batches of
     // their own.
     const transparent = color === null;
     if (this.queued === BATCH_SIZE || (this.queued > 0 && transparent !== this.queuedTransparent)) this.flush();
     this.queuedTransparent = transparent;
     const i = this.queued++;
-    const { dabCenter, dabRadius, dabColor, dabRect } = this.attributes;
+    const { dabCenter, dabRadius, dabColor, dabRect, dabShape, dabAxes } = this.attributes;
     dabCenter.setXY(i, x, y);
     dabRadius.setX(i, radius);
     if (!transparent) dabColor.setXYZ(i, color.r, color.g, color.b);
     dabRect.setXYZW(i, ...rect);
+    dabShape.setX(i, shape);
+    dabAxes.setXYZW(i, ...axes);
   }
 }

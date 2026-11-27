@@ -330,6 +330,20 @@ select option {
   padding: 5px 0;
 }
 
+/* Six tools don't fit across the panel in one row. */
+#tool-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.shapes svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  fill: currentColor;
+}
+
 .swatches {
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
@@ -421,6 +435,12 @@ input[type='range'] {
   gap: 8px;
   color: var(--muted);
   cursor: pointer;
+}
+
+/* The flex layout would otherwise override the hidden attribute, which keeps
+   the Pointy ends option out of the way of the other tools. */
+.checkbox[hidden] {
+  display: none;
 }
 
 .checkbox input {

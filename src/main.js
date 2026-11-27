@@ -377,6 +377,7 @@ const PAINT_HINT = 'Drag on the solid to paint · Alt+click to pick a color · D
 const HINTS = {
   paint: PAINT_HINT,
   erase: PAINT_HINT,
+  line: 'Drag on the solid to paint a straight line · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom',
   stamp: 'Click on the solid to stamp · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom',
   fill: 'Click on the solid to fill an area · Alt+click to pick a color · Drag around it or right-drag to rotate · Scroll to zoom',
   pick: 'Click on the solid to pick up a color · Drag around it or right-drag to rotate · Scroll to zoom',
@@ -398,7 +399,7 @@ function setTool(name) {
   // Each tool's options show while it is chosen, and while the Pick tool is
   // used on the way back to it.
   const options = name === 'pick' ? toolBeforePick : name;
-  taperedOption.hidden = options !== 'paint';
+  taperedOption.hidden = options !== 'paint' && options !== 'line';
   shapeField.hidden = angleField.hidden = options !== 'stamp';
   hideCursor();
 }
@@ -821,7 +822,8 @@ viewport.addEventListener(
       color: tool === 'erase' ? BASE_COLOR : brushColor,
       radius: brushRadius(),
       // Erasing tapered would leave the ends of what it goes over behind.
-      tapered: tool === 'paint' && taperedCheckbox.checked,
+      tapered: (tool === 'paint' || tool === 'line') && taperedCheckbox.checked,
+      straight: tool === 'line',
     });
     showCursor(point);
   },

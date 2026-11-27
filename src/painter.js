@@ -221,7 +221,7 @@ const FLAT_STROKE_REACH = 3;
 function layFlat(surface, start, center, reach) {
   const { adjacent } = surface;
   const corners = cornersOf(surface);
-  const laid = new Map([[start, { xx: 1, xy: 0, yx: 0, yy: 1, x: 0, y: 0 }]]);
+  const laid = new Map([[start, IDENTITY]]);
   const queue = [start];
   while (queue.length > 0) {
     const f = queue.shift();
@@ -267,7 +267,8 @@ function leftOf([px, py], [ax, ay], [bx, by]) {
 
 // Motions of the plane, as { xx, xy, yx, yy, x, y } taking (u, v) to
 // (xx u + xy v + x, yx u + yy v + y).
-const move = ({ xx, xy, yx, yy, x, y }, [u, v]) => [xx * u + xy * v + x, yx * u + yy * v + y];
+const IDENTITY = { xx: 1, xy: 0, yx: 0, yy: 1, x: 0, y: 0 };
+const move =({ xx, xy, yx, yy, x, y }, [u, v]) => [xx * u + xy * v + x, yx * u + yy * v + y];
 
 // Where a motion, or a symmetry's map of a face, takes a direction.
 const linear = ({ xx, xy, yx, yy }, [u, v]) => [xx * u + xy * v, yx * u + yy * v];
@@ -298,6 +299,127 @@ function edgeMotion([ax, ay], [bx, by], [cx, cy], [dx, dy]) {
   const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
   return { xx: cos, xy: -sin, yx: sin, yy: cos, x: cx - (cos * ax - sin * ay), y: cy - (sin * ax + cos * ay) };
 }
+
+// Where a point in a face's coordinates is in space.
+const onFace = ({ center, right, up }, [x, y]) => center.clone().addScaledVector(right, x).addScaledVector(up, y);
+
+// A straight line on the surface from `start`, { face, x, y } in the face's
+// coordinates, going `length` in `direction`, a unit vector in them. Straight
+// on a solid means straight on its surface laid flat along the line, as a
+// ruler on the paper net would draw it: the line crosses each edge into the
+// face glued there, at the angle it met the edge at. It is cut into pieces,
+// one for each face it crosses in turn, each with its ends in that face's
+// coordinates and the motion taking the start face's coordinates to the
+// face's, as the surface lies flat along the line.
+//
+// A line that runs into a corner goes on past it on one side, which is as
+// straight as it can go, since the faces around a corner don't lie flat.
+export function traceLine(surface, start, direction, length) {
+  const { adjacent } = surface;
+  const corners = cornersOf(surface);
+  const pieces = [];
+  let [face, from, [dx, dy], left, motion] = [start.face, [start.x, start.y], direction, length, IDENTITY];
+  for (;;) {
+    // The line leaves the face across the first edge it heads out over.
+    let exit = null;
+    corners[face].forEach((a, i) => {
+      const b = corners[face][(i + 1) % corners[face].length];
+      const outward = ((b[1] - a[1]) * dx - (b[0] - a[0]) * dy) / Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (outward <= 0) return;
+      const t = Math.max(leftOf(from, a, b), 0) / outward;
+      if (!exit || t < exit.t) exit = { t, i, a, b };
+    });
+    const t = exit ? Math.min(exit.t, left) : left;
+    const to = [from[0] + dx * t, from[1] + dy * t];
+    pieces.push({ face, from, to, motion });
+    if (!exit || exit.t >= left || pieces.length === MAX_LINE_PIECES) return { start, direction, length, pieces };
+    const [g, j] = adjacent[face][exit.i];
+    // Edge j of face g runs the other way, from b to a.
+    const across = edgeMotion(exit.a, exit.b, corners[g][(j + 1) % corners[g].length], corners[g][j]);
+    [dx, dy] = linear(across, [dx, dy]);
+    [face, from, left, motion] = [g, move(across, to), left - t, compose(across, motion)];
+  }
+}
+
+// A line crosses this many faces at most. Only a line going round and round
+// a corner exactly, which it can't get past, would cross more.
+const MAX_LINE_PIECES = 1000;
+
+// The straight line from where `previous` starts to a point on the surface,
+// as traceLine() gives it. `previous` is the line to where the pointer was
+// just before, and the new line follows on from it.
+//
+// A straight line between two points is the one through them on the surface
+// laid flat, but there are many ways to lay it flat, around a corner one way
+// or the other. Lines from a point that pass a corner on either side part
+// there. Where the faces around the corner add up to less than a full turn,
+// as on a convex solid, the lines cross over behind it, and some points are
+// reached both ways round. Where they add up to more, as at the bottom of a
+// stellated solid's spikes, they leave a gap behind it that no straight line
+// reaches.
+//
+// So this lays the point's face flat along the previous line and across the
+// edges beside it, and keeps the line that reaches the point and turns least
+// from the previous line, which follows the pointer round a corner on the
+// side it went. A line that misses, going round a corner the other way, lays
+// the point's face flat along itself to try again. Where no line reaches the
+// point, the line ends as close to it as any came.
+export function straightLine(surface, previous, point) {
+  const { faceFrames, adjacent } = surface;
+  const corners = cornersOf(surface);
+  const { start } = previous;
+  const origin = [start.x, start.y];
+  const face = faceAt(surface, point);
+  const target = toFaceCoordinates(faceFrames[face], point);
+  const goal = onFace(faceFrames[face], target);
+  const tried = [];
+  let lines = [previous];
+  let closest = null;
+  for (let round = 0; round < LINE_ROUNDS; round++) {
+    const motions = [];
+    for (const { pieces } of lines) {
+      for (const { face: f, motion } of pieces) {
+        if (f === face) motions.push(motion);
+        corners[f].forEach((a, i) => {
+          const [g, j] = adjacent[f][i];
+          if (g !== face) return;
+          const b = corners[f][(i + 1) % corners[f].length];
+          motions.push(compose(edgeMotion(a, b, corners[g][(j + 1) % corners[g].length], corners[g][j]), motion));
+        });
+      }
+    }
+    // The pointer may have jumped, across a gap in the solid's outline.
+    if (round === 0 && motions.length === 0) motions.push(layFlat(surface, start.face, origin, Infinity).get(face));
+
+    const found = [];
+    for (const motion of motions) {
+      const end = move(inverse(motion), target);
+      if (tried.some(([x, y]) => Math.hypot(x - end[0], y - end[1]) < 1e-9)) continue;
+      tried.push(end);
+      const length = Math.hypot(end[0] - origin[0], end[1] - origin[1]);
+      const direction = length > 0 ? [(end[0] - origin[0]) / length, (end[1] - origin[1]) / length] : [1, 0];
+      const line = traceLine(surface, start, direction, length);
+      const last = line.pieces.at(-1);
+      found.push({ line, miss: onFace(faceFrames[last.face], last.to).distanceTo(goal) });
+    }
+    const hits = found.filter(({ miss }) => miss < LINE_TOLERANCE).map(({ line }) => line);
+    if (hits.length > 0) {
+      // How far a line turns from the previous one, or before the line has
+      // gone anywhere, how long it is.
+      const [px, py] = previous.direction;
+      const turn = ({ direction: [x, y], length }) => (previous.length > 0 ? -(x * px + y * py) : length);
+      return hits.reduce((best, line) => (turn(line) < turn(best) ? line : best));
+    }
+    for (const candidate of found) if (!closest || candidate.miss < closest.miss) closest = candidate;
+    lines = found.map(({ line }) => line);
+  }
+  return closest?.line ?? previous;
+}
+
+// How many times straightLine() lays the point's face flat along the lines it
+// has found, and how close one of them must come to the point to reach it.
+const LINE_ROUNDS = 4;
+const LINE_TOLERANCE = 1e-6;
 
 // Draws antialiased discs and stamp shapes into the atlas, each clipped to its
 // face's cell. Positions and radii are in atlas texels. A shape's axes are
@@ -419,7 +541,8 @@ const pixelShader = {
 // A stroke's points are where they were on the solid as it stood when it was
 // painted, so a stroke keeps the turn it was painted at. It also keeps the
 // face each point is on, as a point on an edge can't tell, and the radius of
-// the dab there, which is smaller toward a tapered stroke's ends.
+// the dab there, which is smaller toward a tapered stroke's ends. A straight
+// line is kept as a stroke along it.
 export class Painter {
   constructor(renderer) {
     this.renderer = renderer;
@@ -431,6 +554,8 @@ export class Painter {
     this.path = [];
     this.lifted = false;
     this.tapered = false;
+    // The line a straight stroke follows, from traceLine().
+    this.line = null;
     this.queued = 0;
     this.queuedTransparent = false;
 
@@ -525,23 +650,38 @@ export class Painter {
 
   // `group` is the symmetry group that repeats the stroke; `radius` is in
   // world units, `color` a linear THREE.Color, or null to paint transparent.
-  // A `tapered` stroke comes to a point at both ends.
-  beginStroke(point, { group, color, radius, tapered = false }) {
+  // A `tapered` stroke comes to a point at both ends. A `straight` one goes
+  // in a straight line on the surface from where it starts to where it is
+  // extended to last.
+  beginStroke(point, { group, color, radius, tapered = false, straight = false }) {
     const { turn } = this.painting;
     this.stroke = { type: 'stroke', group, color: color?.clone() ?? null, radius, turn, points: [], faces: [], radii: [] };
     this.path = [];
     this.lifted = false;
     this.tapered = tapered;
+    this.line = null;
     // Where a stroke ends is only known once it has, so its end is tapered
     // then, by putting back the texture from before the stroke and drawing
     // the stroke again. Replaying the whole history instead, as undo does,
-    // would hold up the end of every stroke on a well-painted solid.
-    if (tapered) this.saveSnapshot();
+    // would hold up the end of every stroke on a well-painted solid. A
+    // straight line is drawn again like that whenever its end moves.
+    if (tapered || straight) this.saveSnapshot();
+    if (straight) {
+      const surface = this.surface(turn);
+      const face = faceAt(surface, point);
+      const [x, y] = toFaceCoordinates(surface.faceFrames[face], point);
+      this.line = traceLine(surface, { face, x, y }, [1, 0], 0);
+    }
     this.extendStroke(point);
   }
 
   extendStroke(point) {
     const surface = this.surface(this.stroke.turn);
+    if (this.line) {
+      this.line = straightLine(surface, this.line, point);
+      this.drawLine(surface);
+      return;
+    }
     const last = this.lifted ? null : this.path.at(-1);
     this.lifted = false;
     if (last) {
@@ -555,16 +695,47 @@ export class Painter {
   }
 
   // Breaks the stroke without ending it, e.g. when the pointer leaves the
-  // solid, so it isn't joined up across the gap.
+  // solid, so it isn't joined up across the gap. A straight line stays as it
+  // is until the pointer comes back.
   liftStroke() {
     this.lifted = true;
   }
 
   endStroke() {
-    if (this.tapered && this.snapshot) this.taperEnd();
+    if (this.tapered && this.snapshot && !this.line) this.taperEnd();
     if (this.stroke.points.length > 0) this.record(this.stroke);
     this.stroke = null;
     this.path = [];
+    this.line = null;
+  }
+
+  // Draws the straight line from the start, over the texture as it was
+  // before the stroke. Its end is known all along, so a tapered line comes to
+  // a point at both ends while it is drawn.
+  drawLine(surface) {
+    const { stroke, line } = this;
+    const radiusAt = this.tapered ? this.taperedRadius(line.length) : () => stroke.radius;
+    this.restoreSnapshot();
+    Object.assign(stroke, { points: [], faces: [], radii: [] });
+    // `before` is how far along the line its kth piece starts.
+    let [s, k, before] = [0, 0, 0];
+    for (;;) {
+      let piece = line.pieces[k];
+      let pieceLength = Math.hypot(piece.to[0] - piece.from[0], piece.to[1] - piece.from[1]);
+      while (s > before + pieceLength && k < line.pieces.length - 1) {
+        before += pieceLength;
+        piece = line.pieces[++k];
+        pieceLength = Math.hypot(piece.to[0] - piece.from[0], piece.to[1] - piece.from[1]);
+      }
+      const t = pieceLength > 0 ? Math.min((s - before) / pieceLength, 1) : 0;
+      const at = [0, 1].map((i) => piece.from[i] + (piece.to[i] - piece.from[i]) * t);
+      this.addDab({ point: onFace(surface.faceFrames[piece.face], at), face: piece.face, radius: radiusAt(s) });
+      if (s >= line.length) return;
+      // Spaced for the smaller radius, either here or a step further on,
+      // where a tapered line's radius may have shrunk.
+      const step = this.spacing(radiusAt(s));
+      s = Math.min(s + this.spacing(Math.min(radiusAt(s), radiusAt(s + step))), line.length);
+    }
   }
 
   // The stroke's path holds the points where dabs of the brush's full radius
@@ -582,21 +753,26 @@ export class Painter {
   }
 
   // Draws the stroke again with both of its ends tapered, now that it is
-  // known where it ends, over the texture as it was before the stroke. A
-  // stroke too short to reach its full radius from both ends tapers over half
-  // its length at each, so a short flick makes a leaf shape, and a click that
-  // doesn't go anywhere makes a round dot.
+  // known where it ends, over the texture as it was before the stroke.
   taperEnd() {
     const { stroke, path } = this;
     const surface = this.surface(stroke.turn);
-    const length = path.at(-1).s;
-    const reach = Math.min(TAPER_LENGTH * stroke.radius, length / 2);
-    const radiusAt = (s) => (reach > 0 ? stroke.radius * taper(Math.min(s, length - s) / reach) : stroke.radius);
+    const radiusAt = this.taperedRadius(path.at(-1).s);
     this.restoreSnapshot();
     Object.assign(stroke, { points: [], faces: [], radii: [] });
     path.forEach((next, k) => {
       for (const dab of this.dabsTo(surface, next.joined ? path[k - 1] : null, next, radiusAt)) this.addDab(dab);
     });
+  }
+
+  // The radius at each distance along a stroke of `length` that comes to a
+  // point at both ends. A stroke too short to reach its full radius from both
+  // ends tapers over half its length at each, so a short flick makes a leaf
+  // shape, and a click that doesn't go anywhere makes a round dot.
+  taperedRadius(length) {
+    const { radius } = this.stroke;
+    const reach = Math.min(TAPER_LENGTH * radius, length / 2);
+    return (s) => (reach > 0 ? radius * taper(Math.min(s, length - s) / reach) : radius);
   }
 
   // The dabs from a point of the stroke's path, which has had its dab, up to
@@ -702,7 +878,11 @@ export class Painter {
   }
 
   // Draws the queued dabs into the texture; call before rendering the scene.
-  flush() {
+  // Drawing into the texture makes all of its mipmaps again, which takes
+  // about as long as drawing a batch of dabs, so a batch drawn only to make
+  // room in the queue leaves them to the batch after it. A long stroke, which
+  // a straight line redraws whenever it moves, takes many batches.
+  flush({ mipmaps = true } = {}) {
     if (this.queued === 0) return;
     for (const attribute of Object.values(this.attributes)) {
       attribute.addUpdateRange(0, this.queued * attribute.itemSize);
@@ -710,7 +890,10 @@ export class Painter {
     }
     this.dabs.geometry.instanceCount = this.queued;
     setPaintBlending(this.dabs.material, this.queuedTransparent);
+    const { texture } = this.target;
+    texture.generateMipmaps = mipmaps;
     this.drawOver(this.scene);
+    texture.generateMipmaps = true;
     this.queued = 0;
   }
 
@@ -893,7 +1076,10 @@ export class Painter {
     // Transparent dabs blend differently, so they are drawn in batches of
     // their own.
     const transparent = color === null;
-    if (this.queued === BATCH_SIZE || (this.queued > 0 && transparent !== this.queuedTransparent)) this.flush();
+    // A dab is queued straight after, so there is always a batch after this.
+    if (this.queued === BATCH_SIZE || (this.queued > 0 && transparent !== this.queuedTransparent)) {
+      this.flush({ mipmaps: false });
+    }
     this.queuedTransparent = transparent;
     const i = this.queued++;
     const { dabCenter, dabRadius, dabColor, dabRect, dabShape, dabAxes } = this.attributes;

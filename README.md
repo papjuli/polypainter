@@ -36,6 +36,10 @@ Try it here: **https://papjuli.github.io/polypainter/**.
 - Check Pointy ends to paint strokes that come to a point at both ends. The end
   of a stroke comes to its point when you let go. A short flick makes a leaf
   shape, and a click still makes a round dot. Erasing always has round ends.
+- With the Line tool, drag to paint a straight line from where you press to
+  the pointer. It is straight along the surface, so it bends where it crosses an edge, and it tries to follow the
+  pointer around a corner on the side you went. Repeated by the symmetry,
+  lines weave into bands and stars around the solid.
 - With the Stamp tool, click to stamp a star, sparkle, heart, flower or moon,
   repeated by the symmetry like a stroke. A stamp stands upright on the screen,
   turned by the Angle slider, and its copies are turned and mirrored the way
@@ -49,8 +53,9 @@ Try it here: **https://papjuli.github.io/polypainter/**.
   which the inside of the solid shows. Paint over a hole to close it again.
 - With the Pick tool, click on the solid to take up the color painted there,
   as it was painted. Clicking a hole picks transparent paint. Then the tool
-  goes back to painting, stamping or filling. Alt+click (Option+click on a
-  Mac) picks a color with the Paint, Stamp, Fill and Erase tools too.
+  goes back to painting, drawing lines, stamping or filling. Alt+click
+  (Option+click on a Mac) picks a color with the Paint, Line, Stamp, Fill and
+  Erase tools too.
 - Custom colors you paint or fill with are remembered in a row under the
   swatches, the most recent first, up to ten of them, and kept for your next
   visit. Click one to make it the custom color again.
@@ -108,7 +113,7 @@ Try it here: **https://papjuli.github.io/polypainter/**.
 npm install
 npm run dev      # start the dev server
 npm run build    # production build in dist/
-npm test         # check the nets, 3D models, kaleidocycles, stamps and fills of all solids
+npm test         # check the nets, 3D models, kaleidocycles, stamps, lines and fills of all solids
 ```
 
 The nets are laid out ahead of time in Python and saved in `src/nets/`, so
@@ -167,7 +172,12 @@ image and an A4 PDF in `previews/`, and all of them in `previews/nets.pdf`.
   radius, which shrinks toward a pointy stroke's ends, with the dabs closer
   together there. The end of a stroke is only known once you let go, so then
   the painter puts back a copy of the texture from before the stroke and draws
-  the stroke again, tapered at both ends. A stamp is laid flat across the edges
+  the stroke again, tapered at both ends. A straight line is followed across
+  the edges it crosses, each face laid flat beside the one before. There may
+  be more than one straight line to the pointer, around a corner either way,
+  so of those found beside the line drawn a moment before, the one that turns
+  least from it is kept. The line is drawn again from the copy of the texture
+  whenever the pointer moves, and kept as a stroke. A stamp is laid flat across the edges
   it comes near on every solid, as kaleidocycles are painted, because a ball is
   the only shape every edge cuts the same way; it is drawn into each face's
   cell turned, and mirrored, as the face's map takes it. The texture keeps its alpha premultiplied,

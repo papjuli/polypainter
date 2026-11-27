@@ -330,10 +330,14 @@ select option {
   padding: 5px 0;
 }
 
-/* Six tools don't fit across the panel in one row. */
+/* Seven tools don't fit across the panel in one row. Four go in the first,
+   and the rest share the second. */
 #tool-picker {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  flex-wrap: wrap;
+}
+
+#tool-picker button {
+  flex: 1 0 calc(25% - 2px);
 }
 
 .shapes svg {
